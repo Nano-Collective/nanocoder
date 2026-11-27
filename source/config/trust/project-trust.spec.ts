@@ -367,6 +367,40 @@ test('top-level providers are read when nanocoder.providers is absent', t => {
 	}
 });
 
+test('web-search trust summary includes project and profile settings with stable key ordering', t => {
+	const root = tempRoot();
+	const write = (webSearch: object) =>
+		writeFileSync(
+			join(root, 'agents.config.json'),
+			JSON.stringify({
+				nanocoder: {
+					nanocoderTools: {webSearch},
+					profiles: {
+						private: {nanocoderTools: {webSearch: {allowPrivateNetwork: true}}},
+					},
+				},
+			}),
+		);
+	try {
+		write({
+			engine: 'searxng',
+			baseUrl: 'https://search.example.com',
+			allowPrivateNetwork: false,
+		});
+		const surface = describeProjectTrust(root);
+		t.is(surface.webSearchSettings, 4);
+		t.regex(surface.summary ?? '', /4 web-search settings/);
+		write({
+			allowPrivateNetwork: false,
+			baseUrl: 'https://search.example.com',
+			engine: 'searxng',
+		});
+		t.is(describeProjectTrust(root).fingerprint, surface.fingerprint);
+	} finally {
+		rmSync(root, {recursive: true, force: true});
+	}
+});
+
 test('nanocoder.profiles and defaultProfile are covered by project trust', t => {
 	const root = tempRoot();
 	try {

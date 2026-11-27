@@ -43,6 +43,8 @@ export interface ProjectTrustSurface {
 	permissionSettings: number;
 	/** Project providers with a `baseUrl`, where prompts and code are sent. */
 	providerEndpoints: number;
+	/** Project web-search settings that choose where queries are sent. */
+	webSearchSettings: number;
 	fingerprint: string;
 	/** Null when this folder will not run any of the above. */
 	summary: string | null;
@@ -53,7 +55,8 @@ export interface ProjectTrustSurface {
  * formatters, LSP servers, project MCP servers, custom tools, and the skills, agents,
  * and commands the daemon triggers on its own. Also the `.env` it loads, the
  * project settings that relax confirmations (`alwaysAllow`, `defaultMode`,
- * `sandbox`, `verify.trustLevel`), and project provider `baseUrl`s. The
+ * `sandbox`, `verify.trustLevel`), project provider `baseUrl`s, and web-search
+ * engine, endpoint, and private-network settings (including profiles). The
  * fingerprint covers those files, so a later edit is visible even when the
  * counts stay the same. Each part adds a line only when present, so a folder
  * without them keeps the fingerprint it had before they were covered.
@@ -76,6 +79,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const envFile = listEnvFile(root, lines);
 	const permissionSettings = listPermissionSettings(config, lines);
 	const providerEndpoints = listProviderEndpoints(config, lines);
+	const webSearchSettings = listWebSearchSettings(config, lines);
 
 	const parts = [
 		countLabel(plugins, 'plugin', 'plugins'),
@@ -92,6 +96,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		envFile ? 'a .env file' : null,
 		countLabel(permissionSettings, 'permission setting', 'permission settings'),
 		countLabel(providerEndpoints, 'provider endpoint', 'provider endpoints'),
+		countLabel(webSearchSettings, 'web-search setting', 'web-search settings'),
 	].filter((part): part is string => part !== null);
 
 	return {
@@ -108,6 +113,7 @@ export function describeProjectTrust(directory: string): ProjectTrustSurface {
 		envFile,
 		permissionSettings,
 		providerEndpoints,
+		webSearchSettings,
 		fingerprint: createHash('sha256').update(lines.join('\n')).digest('hex'),
 		summary:
 			parts.length > 0 ? `This folder contains: ${parts.join(', ')}.` : null,
@@ -393,6 +399,40 @@ function listProviderEndpoints(
 	return count;
 }
 
+function listWebSearchSettings(
+	config: ProjectConfig | undefined,
+	lines: string[],
+): number {
+	let count = 0;
+	const countTools = (tools: unknown, prefix: string): void => {
+		if (!tools || typeof tools !== 'object' || Array.isArray(tools)) return;
+		const webSearch = (tools as Record<string, unknown>).webSearch;
+		if (!webSearch || typeof webSearch !== 'object' || Array.isArray(webSearch))
+			return;
+		const settings = webSearch as Record<string, unknown>;
+		for (const key of ['engine', 'baseUrl', 'allowPrivateNetwork']) {
+			if (settings[key] === undefined) continue;
+			lines.push(`webSearch ${prefix}${key} ${JSON.stringify(settings[key])}`);
+			count++;
+		}
+	};
+	countTools(config?.nanocoder?.nanocoderTools, '');
+	const profiles = config?.nanocoder?.profiles;
+	if (profiles && typeof profiles === 'object' && !Array.isArray(profiles)) {
+		for (const [name, profile] of Object.entries(profiles).sort(([a], [b]) =>
+			a.localeCompare(b),
+		)) {
+			if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+				countTools(
+					(profile as Record<string, unknown>).nanocoderTools,
+					`profile:${JSON.stringify(name)} `,
+				);
+			}
+		}
+	}
+	return count;
+}
+
 function listMcpServers(root: string, lines: string[]): number {
 	const file = path.join(root, '.mcp.json');
 	if (!existsSync(file)) return 0;
@@ -652,6 +692,7 @@ function hookEntries(entries: unknown): object[] {
 
 interface ProjectConfig {
 	nanocoder?: {
+		nanocoderTools?: {webSearch?: unknown};
 		defaultProfile?: unknown;
 		profiles?: Record<string, unknown>;
 		hooks?: Partial<Record<HookEvent, unknown>>;
