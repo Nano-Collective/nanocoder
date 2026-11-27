@@ -1,24 +1,27 @@
 import {getProjectRoot} from '@/services/session-cwd';
 import {TimelineManager} from '@/services/timeline-manager';
-import type {TimelineEntryMeta} from '@/types/timeline';
+import type {Message} from '@/types/core';
+import type {
+	TimelineEntryMeta,
+	TimelineRevertPlan,
+	TimelineRevertResult,
+} from '@/types/timeline';
 
 /**
  * `/rewind`: restore the workspace and the conversation to the state they had
  * just before an earlier prompt.
  *
- * The storage is the action timeline, which already keeps per-session
- * before-images. `/checkpoint` could not do this job: it only exists if the
- * user made one by hand, and it restores files without the messages (#1242).
- * Architect's Revert is the same idea but only covers the last turn of one
- * mode.
+ * A prompt is recorded as a marker entry with no files of its own. The files
+ * come from the per-tool checkpoints the timeline already takes before each
+ * mutating tool call, which is the only set that describes what the agent
+ * actually changed: snapshotting every dirty file at prompt boundaries also
+ * captured the user's own edits and files created while a turn ran, and a
+ * rewind then wrote those back or deleted them.
  *
- * A turn is recorded as a single entry, taken when the prompt is submitted:
- * every file that was dirty at that moment, plus the message index the prompt
- * starts at. Restoring it puts back the pre-prompt contents (and deletes the
- * files the turn created), and slicing the messages to that index removes the
- * prompt and everything after it.
- *
- * Bash side effects are not undoable this way, which is why the picker says so.
+ * Restoring a marker reverts every checkpoint from that prompt onward, so a
+ * rewind undoes the chosen prompt and everything after it. Bash side effects
+ * outside the workspace are not undoable this way, which is why the picker
+ * says so.
  */
 
 /** One prompt that can be rewound to. */
@@ -27,7 +30,10 @@ export interface RewindPoint {
 	promptText: string;
 	/** Slice `messages` to this index to drop the prompt and its turns. */
 	messageIndex: number;
+	/** Files a rewind restores to their before-image. */
 	files: string[];
+	/** Files the agent created, which a rewind deletes. */
+	createdFiles: string[];
 }
 
 /** What `/rewind` restores. */
@@ -39,8 +45,10 @@ export interface RecordPromptOptions {
 	promptText: string;
 	/** `messages.length` before the prompt was appended. */
 	messageIndex: number;
-	/** Groups the entries of one prompt; only used for display and retries. */
+	/** Groups the marker with the tool checkpoints of the same prompt. */
 	turnId?: string;
+	/** Stable id on the user message, resolved again when the picker opens. */
+	messageId?: string;
 }
 
 const TITLE_MAX_CHARS = 60;
@@ -53,146 +61,145 @@ export function promptTitle(promptText: string): string {
 }
 
 /**
- * Record the state a later `/rewind` returns to.
+ * Record the point a later `/rewind` returns to.
  *
- * Called before the prompt's first tool runs, so the scan describes the
- * workspace the user was looking at. When the scan cannot answer (no git, or
- * more dirty files than it will list) the point is still recorded, with no
- * files: rewinding the conversation then works, and "restore code" honestly
- * reports that it restored nothing rather than pretending to have undone a
- * workspace it could not read.
+ * Called before the prompt is sent, so its position in `messages` is exactly
+ * the boundary a rewind slices to. The marker carries no files: the tool
+ * checkpoints recorded while the turn runs supply those.
  */
 export async function recordPromptStart(
 	options: RecordPromptOptions,
 ): Promise<TimelineEntryMeta | null> {
-	const {timeline, promptText, messageIndex, turnId} = options;
-
-	const scan = timeline.getModifiedFiles();
-	const usable = scan.available && !scan.truncated;
-
-	const files =
-		usable && scan.files.length > 0
-			? await timeline.snapshotPaths(scan.files)
-			: new Map<string, string | null>();
+	const {timeline, promptText, messageIndex, turnId, messageId} = options;
 
 	return timeline.capture({
-		toolCallId: `prompt-${messageIndex}`,
+		toolCallId: `prompt-${messageId ?? messageIndex}`,
 		toolName: 'prompt',
 		title: promptTitle(promptText),
 		truncateToMessageIndex: messageIndex,
 		turnId,
 		promptText,
-		files,
+		messageId,
+		files: new Map<string, string | null>(),
 	});
 }
 
 /**
- * Record the files the prompt created or changed.
+ * Classify the paths a revert from `startEntry` onward would touch.
  *
- * The start capture only knows the files that were already dirty, so a file
- * the turn created is invisible to it and a rewind would leave it behind. This
- * second entry covers exactly the paths that were clean (or absent) at prompt
- * start: their before-image is HEAD, or `null` when HEAD has never seen them,
- * which makes the revert delete them. Paths the start entry already recorded
- * are skipped so their uncommitted contents are not replaced with HEAD.
- *
- * Both entries share the prompt's message index, and `revertTo` widens to the
- * whole turn, so one rewind undoes both.
+ * Oldest first: `revertTo` applies entries newest-first, so the earliest
+ * before-image is the one left on disk.
  */
-export async function recordPromptEnd(
-	options: RecordPromptOptions,
-): Promise<TimelineEntryMeta | null> {
-	const {timeline, promptText, messageIndex, turnId} = options;
+function describeEntries(
+	entries: TimelineEntryMeta[],
+	startIndex: number,
+): Pick<RewindPoint, 'files' | 'createdFiles'> {
+	const files: string[] = [];
+	const createdFiles: string[] = [];
+	const classified = new Set<string>();
 
-	const scan = timeline.getModifiedFiles();
-	if (scan.truncated || !scan.available) {
-		return null;
+	for (const entry of entries.slice(startIndex)) {
+		const created = new Set(entry.createdFiles);
+		for (const filePath of entry.filesChanged) {
+			if (classified.has(filePath)) continue;
+			classified.add(filePath);
+			if (created.has(filePath)) {
+				createdFiles.push(filePath);
+			} else {
+				files.push(filePath);
+			}
+		}
 	}
 
-	const entries = await timeline.list();
-	const startEntry = entries.find(
-		entry =>
-			entry.promptText !== undefined &&
-			entry.truncateToMessageIndex === messageIndex,
-	);
-	const recorded = new Set(startEntry?.filesChanged ?? []);
-
-	const files = new Map<string, string | null>();
-	for (const filePath of scan.files) {
-		const relativePath = timeline.toRelativePath(filePath);
-		if (!relativePath || recorded.has(relativePath)) continue;
-		if (files.has(relativePath)) continue;
-
-		const head = timeline.readHeadSnapshot(relativePath);
-		// A binary before-image is not recorded at all: restoring a corrupt one
-		// is worse than leaving the file alone.
-		if (head.kind === 'binary') continue;
-		files.set(relativePath, head.kind === 'text' ? head.content : null);
-	}
-
-	if (files.size === 0) return null;
-
-	return timeline.capture({
-		toolCallId: `prompt-end-${messageIndex}`,
-		toolName: 'prompt',
-		title: promptTitle(promptText),
-		truncateToMessageIndex: messageIndex,
-		turnId,
-		promptText,
-		files,
-	});
+	return {files, createdFiles};
 }
 
 /**
  * The recorded prompts, newest first.
  *
  * Only entries that carry a prompt are rewind points; tool-level checkpoints
- * from ACP or from before this feature are ignored, so an old index cannot
- * offer a prompt that was never stored.
+ * from ACP or from before this feature are ignored. When `messages` is given
+ * (the live conversation), points are resolved by their stable message id and
+ * a point whose message compaction removed is dropped: its stored index would
+ * otherwise match an unrelated prompt. Without `messages`, the stored index is
+ * used as-is (tests and callers that only have the timeline).
  */
-export function buildRewindPoints(entries: TimelineEntryMeta[]): RewindPoint[] {
-	return entries
-		.filter(entry => typeof entry.promptText === 'string')
-		.map(entry => ({
+export function buildRewindPoints(
+	entries: TimelineEntryMeta[],
+	messages?: Message[],
+): RewindPoint[] {
+	const messageIndexById = messages
+		? new Map(
+				messages.flatMap((message, index) =>
+					message.id === undefined ? [] : [[message.id, index] as const],
+				),
+			)
+		: null;
+
+	const points: RewindPoint[] = [];
+
+	for (const [position, entry] of entries.entries()) {
+		if (typeof entry.promptText !== 'string') continue;
+
+		let messageIndex = entry.truncateToMessageIndex;
+		if (messages) {
+			if (!entry.messageId) continue;
+			const resolved = messageIndexById?.get(entry.messageId);
+			if (resolved === undefined) continue;
+			messageIndex = resolved;
+		}
+
+		points.push({
 			entry,
-			promptText: entry.promptText as string,
-			messageIndex: entry.truncateToMessageIndex,
-			files: entry.filesChanged,
-		}))
-		.sort(
-			(a, b) => b.messageIndex - a.messageIndex || b.entry.seq - a.entry.seq,
-		);
+			promptText: entry.promptText,
+			messageIndex,
+			...describeEntries(entries, position),
+		});
+	}
+
+	return points.sort(
+		(a, b) => b.messageIndex - a.messageIndex || b.entry.seq - a.entry.seq,
+	);
 }
 
 /** Every point in the session's timeline, newest first. */
 export async function listRewindPoints(
 	timeline: TimelineManager,
+	messages?: Message[],
 ): Promise<RewindPoint[]> {
-	return buildRewindPoints(await timeline.list());
+	return buildRewindPoints(await timeline.list(), messages);
+}
+
+/** What restoring `point` would write and delete, for the confirmation prompt. */
+export async function planRewind(
+	timeline: TimelineManager,
+	point: RewindPoint,
+): Promise<TimelineRevertPlan> {
+	return timeline.describeRevert(point.entry.id);
 }
 
 /**
- * Restore the files a prompt started with, and drop that prompt's timeline
- * entries so they cannot be rewound to twice.
+ * Restore the before-images of every tool checkpoint from `point` onward, and
+ * drop those entries so they cannot be rewound to twice. `filesFailed` reports
+ * writes that did not land; the others were still applied.
  */
 export async function restoreFiles(
 	timeline: TimelineManager,
 	point: RewindPoint,
-): Promise<string[]> {
-	const result = await timeline.revertTo(point.entry.id);
-	return result.filesRestored;
+): Promise<TimelineRevertResult> {
+	return timeline.revertTo(point.entry.id);
 }
 
 /**
- * Drop the conversation from `point` onward. Slicing `messages` is the
- * caller's job (it owns the array); this only discards the timeline entries
- * that described the discarded turns.
+ * Drop the conversation from `point` onward. Truncation is keyed by the
+ * entry's position, not a message index, so compaction cannot make it remove
+ * a different prompt's entries.
  */
 export async function restoreConversation(
 	timeline: TimelineManager,
 	point: RewindPoint,
 ): Promise<number> {
-	await timeline.truncateAfter(point.messageIndex);
+	await timeline.truncateFrom(point.entry.id);
 	return point.messageIndex;
 }
 

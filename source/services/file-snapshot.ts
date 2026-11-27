@@ -88,6 +88,61 @@ export class FileSnapshotService {
 	}
 
 	/**
+	 * Resolve the nearest existing ancestor and confirm it is really inside the
+	 * workspace. A path that is lexically inside the root can still escape it
+	 * through a directory symlink; `path.relative` cannot see that, `realpath`
+	 * can.
+	 */
+	private async assertResolvesInsideWorkspace(
+		absolutePath: string,
+		relativePath: string,
+	): Promise<void> {
+		let existing = absolutePath;
+		while (!existsSync(existing)) {
+			const parent = path.dirname(existing);
+			if (parent === existing) break;
+			existing = parent;
+		}
+
+		try {
+			const [realRoot, realExisting] = await Promise.all([
+				fs.realpath(this.workspaceRoot),
+				fs.realpath(existing),
+			]);
+			const relative = path.relative(realRoot, realExisting);
+			if (relative.startsWith('..') || path.isAbsolute(relative)) {
+				throw new Error(
+					`Refusing to follow a symlink outside the workspace: ${relativePath}`,
+				);
+			}
+		} catch (error) {
+			if (error instanceof Error && error.message.includes('symlink outside')) {
+				throw error;
+			}
+			// The workspace (or an ancestor) vanished. The lexical check above
+			// already passed; let the write itself report the filesystem error.
+		}
+	}
+
+	/** A symlink at the target would make `writeFile` write through it. */
+	private async assertNotSymlink(
+		absolutePath: string,
+		relativePath: string,
+	): Promise<void> {
+		try {
+			const stats = await fs.lstat(absolutePath);
+			if (stats.isSymbolicLink()) {
+				throw new Error(`Refusing to write through symlink: ${relativePath}`);
+			}
+		} catch (error) {
+			if (error instanceof Error && error.message.includes('symlink')) {
+				throw error;
+			}
+			// Missing target is the common case (a created file being restored).
+		}
+	}
+
+	/**
 	 * Capture the contents of specified files.
 	 *
 	 * Read as bytes, never as text. Snapshots cover whatever git reports as
@@ -162,9 +217,15 @@ export class FileSnapshotService {
 	}
 
 	/**
-	 * Restore files from snapshots
+	 * Restore files from snapshots, reporting each path that did not land
+	 * instead of only throwing once the loop is over. A bulk rewind needs to
+	 * tell the user exactly what it wrote when one file fails part way.
 	 */
-	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
+	async restoreFilesDetailed(
+		snapshots: Map<string, Buffer>,
+	): Promise<{restored: string[]; failed: string[]; errors: string[]}> {
+		const restored: string[] = [];
+		const failed: string[] = [];
 		const errors: string[] = [];
 
 		for (const [relativePath, snapshot] of snapshots) {
@@ -178,16 +239,33 @@ export class FileSnapshotService {
 						`Refusing to restore path outside workspace: ${relativePath}`,
 					);
 				}
+				await this.assertResolvesInsideWorkspace(absolutePath, relativePath);
+				await this.assertNotSymlink(absolutePath, relativePath);
 
 				const directory = path.dirname(absolutePath);
 
 				await fs.mkdir(directory, {recursive: true});
 				await fs.writeFile(absolutePath, snapshot);
+				restored.push(relativePath);
 			} catch (error) {
-				errors.push(`Failed to restore ${relativePath}: ${formatError(error)}`);
+				const reason = formatError(error);
+				failed.push(relativePath);
+				errors.push(`Failed to restore ${relativePath}: ${reason}`);
+				notifyWarning('Could not restore file', true, {
+					context: {relativePath, error: reason},
+				});
 			}
 		}
 
+		return {restored, failed, errors};
+	}
+
+	/**
+	 * Restore files from snapshots. Throws after attempting every file, matching
+	 * the historical all-or-error contract for checkpoint restores.
+	 */
+	async restoreFiles(snapshots: Map<string, Buffer>): Promise<void> {
+		const {errors} = await this.restoreFilesDetailed(snapshots);
 		if (errors.length > 0) {
 			throw new Error(`Failed to restore some files:\n${errors.join('\n')}`);
 		}
@@ -215,6 +293,7 @@ export class FileSnapshotService {
 						`Refusing to remove path outside workspace: ${relativePath}`,
 					);
 				}
+				await this.assertResolvesInsideWorkspace(absolutePath, relativePath);
 
 				await fs.rm(absolutePath, {force: true});
 			} catch (error) {
@@ -423,6 +502,7 @@ export class FileSnapshotService {
 				`Refusing to delete path outside workspace: ${relativePath}`,
 			);
 		}
+		await this.assertResolvesInsideWorkspace(absolutePath, relativePath);
 		if (existsSync(absolutePath)) {
 			await fs.unlink(absolutePath);
 		}

@@ -267,6 +267,9 @@ export function useChatHandler({
 			// would mint a second controller that the caller's abort checks never
 			// see.
 			turnController?: AbortController,
+			// The prompt's rewind id: shared by its timeline marker and every
+			// per-tool checkpoint it records.
+			rewindTurnId?: string,
 		) => {
 			if (!client) return;
 
@@ -306,6 +309,7 @@ export function useChatHandler({
 					privacyEnabled,
 					sessionId,
 					workingDirectory: process.cwd(),
+					turnId: rewindTurnId,
 					onToolExecuted,
 					onFinalAssistantText,
 					onPrivacyEvent: (count: number) => {
@@ -371,8 +375,19 @@ export function useChatHandler({
 		}
 		const sessionId = ensureCurrentSessionId?.();
 		// Where this prompt starts in the message array: the index a `/rewind`
-		// slices back to, and the key its two timeline entries share.
-		const rewindIndex = messages.length + (historyMessages?.length ?? 0);
+		// slices back to. Preceding MCP history messages belong to this prompt,
+		// so they are dropped with it rather than left in the restored thread.
+		// `promptId` is the stable identity recorded alongside it, because
+		// compaction renumbers every index below.
+		const rewindIndex = messages.length;
+		const promptId = generateKey('prompt');
+		// The boundary is the first message this prompt adds. With MCP history
+		// messages that is the first of them, not the user message: rewinding
+		// to before the prompt has to remove the history it carried with it.
+		const rewindBoundaryId =
+			historyMessages && historyMessages.length > 0
+				? `${promptId}-start`
+				: promptId;
 		let wrotePlan = false;
 		let finalAssistantText = '';
 
@@ -469,7 +484,8 @@ export function useChatHandler({
 						timeline,
 						promptText: message,
 						messageIndex: rewindIndex,
-						turnId: `prompt-${rewindIndex}`,
+						turnId: promptId,
+						messageId: rewindBoundaryId,
 					});
 				}
 			} catch (error) {
@@ -483,10 +499,14 @@ export function useChatHandler({
 		// original roles, so a few-shot prompt keeps its turn structure
 		// instead of being flattened into this one user message.
 		const builder = new MessageBuilder(messages);
-		for (const historyMessage of historyMessages ?? []) {
-			builder.addMessage(historyMessage);
+		for (const [index, historyMessage] of (historyMessages ?? []).entries()) {
+			builder.addMessage(
+				index === 0
+					? {...historyMessage, id: rewindBoundaryId}
+					: historyMessage,
+			);
 		}
-		builder.addUserMessage(messageWithContext, images);
+		builder.addUserMessage(messageWithContext, images, promptId);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 
@@ -549,6 +569,7 @@ export function useChatHandler({
 				},
 				architectCheckpointState,
 				controller,
+				promptId,
 			);
 
 			if (
@@ -604,27 +625,6 @@ export function useChatHandler({
 			displayError(error, 'chat-error');
 			onConversationComplete?.();
 		} finally {
-			// Close the rewind point with the files this turn created, so a later
-			// rewind removes them instead of leaving them behind. Best-effort,
-			// like the start capture.
-			if (sessionId) {
-				try {
-					const {getSessionTimeline, recordPromptEnd} = await import(
-						'@/services/rewind'
-					);
-					const timeline = getSessionTimeline(sessionId);
-					if (timeline) {
-						await recordPromptEnd({
-							timeline,
-							promptText: message,
-							messageIndex: rewindIndex,
-							turnId: `prompt-${rewindIndex}`,
-						});
-					}
-				} catch (error) {
-					getLogger().warn({error}, 'Failed to close the rewind point');
-				}
-			}
 			resetStreamingState();
 		}
 	};

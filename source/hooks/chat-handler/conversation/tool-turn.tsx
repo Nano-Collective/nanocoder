@@ -113,6 +113,10 @@ export interface ToolTurnContext {
 	currentModel: string;
 	sessionId?: string;
 	workingDirectory?: string;
+	/** Set by the interactive loop: enables per-tool timeline capture. */
+	timelineTurnId?: string;
+	/** History length when this turn's tools started. */
+	timelineMessageIndex?: number;
 	onToolExecuted?: (toolName: string) => void;
 	walkthroughLifecycle: WalkthroughLifecycle;
 	/** History as the turn started, for the architect checkpoint. */
@@ -156,6 +160,8 @@ export async function runToolTurn(
 		currentModel,
 		sessionId,
 		workingDirectory,
+		timelineTurnId,
+		timelineMessageIndex,
 		onToolExecuted,
 		walkthroughLifecycle,
 		turnStartMessages,
@@ -341,7 +347,12 @@ export async function runToolTurn(
 				...displayOptions,
 				setLiveComponent,
 				signal: signal,
-				executionContext: {sessionId, workingDirectory},
+				executionContext: {
+					sessionId,
+					workingDirectory,
+					turnId: timelineTurnId,
+					timelineMessageIndex,
+				},
 				beforeExecute: async toolCall => {
 					// A mode switch since this batch was classified can hide the
 					// tool; alwaysAllow must not run it under the new mode.
@@ -435,6 +446,8 @@ export async function runToolTurn(
 				abortSignal: signal,
 				sessionId,
 				workingDirectory,
+				turnId: timelineTurnId,
+				timelineMessageIndex,
 			});
 
 		for (let i = 0; i < confirmTools.length; i++) {
@@ -482,7 +495,12 @@ export async function runToolTurn(
 				processToolWithContext,
 				setLiveComponent,
 				signal,
-				sessionId,
+				{
+					sessionId,
+					workingDirectory,
+					turnId: timelineTurnId,
+					timelineMessageIndex,
+				},
 			);
 			turnResults.push(execution.result);
 			recordToolOutcome(

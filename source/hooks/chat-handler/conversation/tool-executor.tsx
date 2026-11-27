@@ -70,17 +70,48 @@ const executeBashStreaming = async (
 	toolManager: ToolManager | null,
 	setLiveComponent: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
-	sessionId?: string,
+	executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 ): Promise<StreamingBashRun> => {
-	const execution = await runStreamingBashTool(
-		toolCall,
-		toolManager,
-		setLiveComponent,
-		'direct-bash',
-		signal,
-		sessionId,
+	// This path bypasses processToolUse, so it takes its own timeline
+	// checkpoint. Bash is opaque: the scan before and after is the only way to
+	// know which files the command touched.
+	const {beginTimelineCapture, finishTimelineCapture} = await import(
+		'@/acp/acp-timeline'
 	);
-	return {...execution, toolCall};
+	const {getSessionTimeline} = await import('@/services/rewind');
+	const timeline =
+		executionContext?.turnId && executionContext.sessionId
+			? getSessionTimeline(
+					executionContext.sessionId,
+					executionContext.workingDirectory,
+				)
+			: null;
+	const capture =
+		timeline && toolManager
+			? await beginTimelineCapture(
+					{timeline},
+					toolManager,
+					toolCall,
+					executionContext?.timelineMessageIndex ?? 0,
+					toolCall.function.name,
+					executionContext?.turnId,
+				)
+			: null;
+	try {
+		const execution = await runStreamingBashTool(
+			toolCall,
+			toolManager,
+			setLiveComponent,
+			'direct-bash',
+			signal,
+			executionContext?.sessionId,
+		);
+		return {...execution, toolCall};
+	} finally {
+		if (timeline) {
+			await finishTimelineCapture({timeline}, capture);
+		}
+	}
 };
 
 /** Display + conversation-state options shared by every executed tool. */
@@ -103,7 +134,7 @@ export const executeApprovedTool = (
 	processToolUse: (toolCall: ToolCall) => Promise<ToolResult>,
 	setLiveComponent?: (component: React.ReactNode) => void,
 	signal?: AbortSignal,
-	sessionId?: string,
+	executionContext?: Omit<ToolExecutionContext, 'abortSignal'>,
 ): Promise<StreamingBashRun | {toolCall: ToolCall; result: ToolResult}> => {
 	if (toolCall.function.name === 'execute_bash' && setLiveComponent) {
 		return executeBashStreaming(
@@ -111,7 +142,7 @@ export const executeApprovedTool = (
 			toolManager,
 			setLiveComponent,
 			signal,
-			sessionId,
+			executionContext,
 		);
 	}
 	return executeOne(toolCall, processToolUse);
@@ -595,7 +626,7 @@ export const executeToolsDirectly = async (
 						processToolWithContext,
 						options?.setLiveComponent,
 						options?.signal,
-						options?.executionContext?.sessionId,
+						options?.executionContext,
 					),
 				);
 			}

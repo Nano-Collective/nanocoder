@@ -66,7 +66,8 @@ export default function RewindPicker({
 							</Text>
 						</Text>
 						<Text color={colors.secondary}>
-							{filesLabel(selected.files.length)} changed •{' '}
+							{filesLabel(selected.files.length)} restored •{' '}
+							{filesLabel(selected.createdFiles.length)} deleted •{' '}
 							{Math.max(0, currentMessageCount - selected.messageIndex)}{' '}
 							message(s) will be removed
 						</Text>
@@ -92,13 +93,16 @@ export default function RewindPicker({
 		);
 	}
 
-	const options: ItemSelectorOption[] = points.map(point => ({
-		label: `${promptTitle(point.promptText) || '(empty prompt)'} · ${filesLabel(
-			point.files.length,
-		)}`,
-		value: point.entry.id,
-		searchText: point.promptText,
-	}));
+	const options: ItemSelectorOption[] = points.map(point => {
+		const changed = point.files.length + point.createdFiles.length;
+		return {
+			label: `${promptTitle(point.promptText) || '(empty prompt)'} · ${filesLabel(
+				changed,
+			)}${point.createdFiles.length > 0 ? ` (${point.createdFiles.length} deleted)` : ''}`,
+			value: point.entry.id,
+			searchText: point.promptText,
+		};
+	});
 
 	return (
 		<TitledBoxWithPreferences

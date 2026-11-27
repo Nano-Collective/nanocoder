@@ -5,11 +5,13 @@ import {
 	successMsg,
 	warningMsg,
 } from '@/components/message-factory';
+import RewindConfirm from '@/components/rewind-confirm';
 import RewindPicker from '@/components/rewind-picker';
 import {
 	getSessionTimeline,
 	listRewindPoints,
 	messagesAfterRewind,
+	planRewind,
 	promptTitle,
 	type RewindMode,
 	type RewindPoint,
@@ -17,6 +19,7 @@ import {
 	restoreFiles,
 } from '@/services/rewind';
 import type {CommandContext, StatefulCommand} from '@/types/index';
+import type {TimelineRevertPlan} from '@/types/timeline';
 import {prefillComposer} from '@/utils/composer-draft';
 import {formatError} from '@/utils/error-formatter';
 import {generateKey} from '@/utils/key-generator';
@@ -39,10 +42,13 @@ async function applyRewind(
 	context: CommandContext,
 ): Promise<void> {
 	let filesRestored: string[] = [];
+	let filesFailed: string[] = [];
 
 	try {
 		if (mode !== 'conversation') {
-			filesRestored = await restoreFiles(timeline, point);
+			const result = await restoreFiles(timeline, point);
+			filesRestored = result.filesRestored;
+			filesFailed = result.filesFailed;
 		}
 
 		if (mode !== 'files') {
@@ -73,6 +79,15 @@ async function applyRewind(
 			),
 		);
 
+		if (filesFailed.length > 0) {
+			context.addToChatQueue(
+				warningMsg(
+					`Could not restore ${filesFailed.length} file(s): ${filesFailed.join(', ')}. The other restored files were written.`,
+					'rewind-partial',
+				),
+			);
+		}
+
 		if (mode !== 'conversation' && filesRestored.length > 0) {
 			context.addToChatQueue(
 				warningMsg(
@@ -83,7 +98,12 @@ async function applyRewind(
 		}
 	} catch (error) {
 		context.addToChatQueue(
-			errorMsg(`Rewind failed: ${formatError(error)}`, 'rewind-error'),
+			errorMsg(
+				`Rewind failed after restoring ${filesRestored.length} file(s)${
+					filesRestored.length > 0 ? `: ${filesRestored.join(', ')}` : ''
+				}. ${formatError(error)}`,
+				'rewind-error',
+			),
 		);
 	}
 }
@@ -117,7 +137,7 @@ export const rewindCommand: StatefulCommand = {
 
 		let points: RewindPoint[];
 		try {
-			points = await listRewindPoints(timeline);
+			points = await listRewindPoints(timeline, context.messages);
 		} catch (error) {
 			context.addToChatQueue(
 				errorMsg(
@@ -147,6 +167,36 @@ export const rewindCommand: StatefulCommand = {
 				resolve();
 			};
 
+			const confirmAndApply = (
+				point: RewindPoint,
+				mode: RewindMode,
+				plan: TimelineRevertPlan,
+			) => {
+				context.setLiveComponent(
+					React.createElement(RewindConfirm, {
+						key: generateKey('rewind-confirm'),
+						point,
+						plan,
+						onConfirm: () => {
+							void (async () => {
+								try {
+									await applyRewind(
+										timeline,
+										point,
+										mode,
+										context.messages,
+										context,
+									);
+								} finally {
+									close();
+								}
+							})();
+						},
+						onCancel: close,
+					}),
+				);
+			};
+
 			context.setLiveComponent(
 				React.createElement(RewindPicker, {
 					key: generateKey('rewind-picker'),
@@ -155,7 +205,19 @@ export const rewindCommand: StatefulCommand = {
 					onCancel: close,
 					onSelect: (point: RewindPoint, mode: RewindMode) => {
 						void (async () => {
+							let delegatedToConfirm = false;
 							try {
+								// Ask for confirmation on the exact file set before
+								// writing. Conversation-only touches no files.
+								if (mode !== 'conversation') {
+									const plan = await planRewind(timeline, point);
+									if (plan.restore.length + plan.remove.length > 0) {
+										confirmAndApply(point, mode, plan);
+										delegatedToConfirm = true;
+										return;
+									}
+								}
+
 								await applyRewind(
 									timeline,
 									point,
@@ -163,8 +225,15 @@ export const rewindCommand: StatefulCommand = {
 									context.messages,
 									context,
 								);
+							} catch (error) {
+								context.addToChatQueue(
+									errorMsg(
+										`Could not plan the rewind: ${formatError(error)}`,
+										'rewind-error',
+									),
+								);
 							} finally {
-								close();
+								if (!delegatedToConfirm) close();
 							}
 						})();
 					},

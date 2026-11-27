@@ -47,11 +47,16 @@ export class MessageBuilder {
 	/**
 	 * Add a user message, optionally with image attachments for multimodal turns.
 	 */
-	addUserMessage(content: string, images?: ImageAttachment[]): this {
+	addUserMessage(
+		content: string,
+		images?: ImageAttachment[],
+		id?: string,
+	): this {
 		this.messages.push({
 			role: 'user',
 			content,
 			...(images && images.length > 0 ? {images} : {}),
+			...(id ? {id} : {}),
 		});
 		return this;
 	}
