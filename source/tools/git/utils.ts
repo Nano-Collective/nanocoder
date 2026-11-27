@@ -541,13 +541,17 @@ export async function hasStagedChanges(): Promise<boolean> {
 export async function isRebaseInProgress(): Promise<boolean> {
 	try {
 		const cwd = getProjectRoot();
-		for (const gitSubdir of ['rebase-merge', 'rebase-apply']) {
+		for (const gitSubdir of ['rebase-merge', 'rebase-apply'] as const) {
 			const rawPath = (
 				await execGitReadOnly(['rev-parse', '--git-path', gitSubdir])
 			).trim();
 			if (!rawPath) continue;
 			const resolved = isAbsolute(rawPath) ? rawPath : join(cwd, rawPath);
-			if (existsSync(resolved)) {
+			// `git am` also uses `rebase-apply` (with an `applying` marker),
+			// whereas `git rebase --apply` writes `rebasing`.
+			const markerPath =
+				gitSubdir === 'rebase-apply' ? join(resolved, 'rebasing') : resolved;
+			if (existsSync(markerPath)) {
 				return true;
 			}
 		}

@@ -711,6 +711,29 @@ test.serial('isRebaseInProgress returns true while paused and false after rebase
 		await runInSessionContext(createSessionContext(repoDir), async () => {
 			t.true(await isRebaseInProgress());
 		});
+		execFileSync('git', ['-C', repoDir, 'rebase', '--abort'], {env, stdio: 'ignore'});
+
+		// Apply-backend rebase (`rebase-apply/rebasing`) is also detected.
+		execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'main'], {env});
+		writeFileSync(join(repoDir, 'f.txt'), 'main-apply\n');
+		execFileSync('git', ['-C', repoDir, 'commit', '-qam', 'main-apply'], {env});
+		execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'topic'], {env});
+		try {
+			execFileSync(
+				'git',
+				['-C', repoDir, '-c', 'rebase.backend=apply', 'rebase', 'main'],
+				{env, stdio: 'ignore'},
+			);
+		} catch {
+			// expected conflict
+		}
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.true(await isRebaseInProgress());
+		});
+		execFileSync('git', ['-C', repoDir, 'rebase', '--abort'], {env, stdio: 'ignore'});
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.false(await isRebaseInProgress());
+		});
 	} finally {
 		rmSync(repoDir, {recursive: true, force: true});
 	}
