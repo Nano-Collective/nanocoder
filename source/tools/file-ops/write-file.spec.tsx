@@ -441,6 +441,37 @@ test.serial('write_file allows overwriting after reading a large-file preview an
 	}
 });
 
+test.serial('write_file validator gives the exact range missing after a large-file preview', async t => {
+	const totalLines = FILE_READ_PREVIEW_THRESHOLD_LINES + 20;
+	const content = Array.from(
+		{length: totalLines},
+		(_, index) => `line-${index + 1}`,
+	).join('\n');
+	await writeFile(join(testDir, 'large-partial.txt'), content, 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'large-partial.txt'});
+
+		const result = await writeFileTool.validator!({
+			path: 'large-partial.txt',
+			content: 'replacement\n',
+		});
+
+		t.false(result.valid);
+		if (!result.valid) {
+			t.regex(
+				result.error,
+				new RegExp(
+					`start_line: ${FILE_READ_PREVIEW_LINES + 1} and end_line: ${totalLines}`,
+				),
+			);
+		}
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
 test.serial('write_file validator: rejects stale content after full ranged reads without a snapshot', async t => {
 	const filePath = join(testDir, 'ranged-stale.txt');
 	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
@@ -466,7 +497,7 @@ test.serial('write_file validator: rejects stale content after full ranged reads
 			content: 'agent replacement\n',
 		});
 		t.false(result.valid);
-		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
+		if (!result.valid) t.regex(result.error, /changed since it was read/);
 		const retry = await writeFileTool.validator!({
 			path: 'ranged-stale.txt',
 			content: 'agent replacement\n',
@@ -499,7 +530,7 @@ test.serial('write_file does not recreate a file deleted while approval was open
 				path: 'ranged-deleted.txt',
 				content: 'agent replacement\n',
 			}),
-			{message: /changed since it was fully read/},
+			{message: /no longer available at this path/},
 		);
 		t.false(existsSync(filePath));
 		// After the stale-read warning, a deliberate retry may create the now-
@@ -1727,7 +1758,7 @@ test.serial('write_file validator: refuses same-size content changes with a rest
 			content: 'the agent version',
 		});
 		t.false(result.valid);
-		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
+		if (!result.valid) t.regex(result.error, /changed since it was read/);
 
 		// Invalidating the stale snapshot must not let a retry overwrite the
 		// external version without a fresh full-file read.
@@ -1801,7 +1832,7 @@ test.serial('write_file rechecks the file after approval before overwriting it',
 				path: 'approval-race.txt',
 				content: 'agent version\n',
 			}),
-			{message: /changed since it was fully read/},
+			{message: /changed since it was read/},
 		);
 		t.is(await readFile(filePath, 'utf-8'), 'external\n');
 	} finally {
@@ -1850,7 +1881,7 @@ test.serial('write_file allows creating a file again after reporting that the re
 		});
 		t.false(staleWrite.valid);
 		if (!staleWrite.valid) {
-			t.regex(staleWrite.error, /changed since it was fully read/);
+			t.regex(staleWrite.error, /no longer available at this path/);
 		}
 
 		const createWrite = await writeFileTool.validator!({

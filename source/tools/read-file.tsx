@@ -185,7 +185,7 @@ const executeReadFile = async (args: {
 			// Record visibility receipt for the preview lines shown
 			recordVisibilityReceipt(absPath, stats, 1, previewEndLine, content);
 
-			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
+			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line: ${totalLines} to continue.]`;
 		}
 
 		// Line ranges specified - read and return content

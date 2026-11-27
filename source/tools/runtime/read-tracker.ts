@@ -540,9 +540,13 @@ export function hasVisibleLines(
 			const visibleRangesStr = receipt.visibleRanges
 				.map(r => (r.start === r.end ? `${r.start}` : `${r.start}-${r.end}`))
 				.join(', ');
+			const endLine = targetLines.reduce(
+				(maximum, targetLine) => Math.max(maximum, targetLine),
+				line,
+			);
 			return {
 				visible: false,
-				error: `Line ${line} in "${absPath}" has not been read. You've only seen lines: ${visibleRangesStr}. Use read_file with start_line and end_line to read the target range first.`,
+				error: `Line ${line} in "${absPath}" has not been read. You've only seen lines: ${visibleRangesStr}. Use read_file with start_line: ${line} and end_line: ${endLine} to read the remaining target range first.`,
 			};
 		}
 	}

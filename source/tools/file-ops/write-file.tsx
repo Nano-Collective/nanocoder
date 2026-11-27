@@ -145,7 +145,14 @@ function invalidateStaleReadState(absPath: string): void {
 }
 
 function staleSnapshotError(path: string): string {
-	return `File "${path}" has changed since it was fully read. Re-read the entire file with read_file before overwriting it.`;
+	return `File "${path}" has changed since it was read. Re-read its current contents with read_file using explicit start_line and end_line ranges; if it is large, continue with the range suggested by the preview before overwriting it.`;
+}
+
+function staleReadError(path: string, absPath: string): string {
+	if (!existsSync(absPath)) {
+		return `File "${path}" is no longer available at this path after it was read. This write was blocked to avoid silently recreating a missing target. Confirm the path's state; retry only if you intend to create the file.`;
+	}
+	return staleSnapshotError(path);
 }
 
 const executeWriteFile = async (args: {
@@ -161,7 +168,7 @@ const executeWriteFile = async (args: {
 	const fileExists = existsSync(absPath);
 	if (!fileExists && hasSeenFile(absPath)) {
 		invalidateStaleReadState(absPath);
-		throw new Error(staleSnapshotError(args.path));
+		throw new Error(staleReadError(args.path, absPath));
 	}
 
 	if (fileExists) {
@@ -224,7 +231,7 @@ const executeWriteFile = async (args: {
 	if (fileExists) {
 		if (!(await matchesCurrentReadState(absPath))) {
 			invalidateStaleReadState(absPath);
-			throw new Error(staleSnapshotError(args.path));
+			throw new Error(staleReadError(args.path, absPath));
 		}
 		expectedTargetPath = await realpath(absPath);
 	}
@@ -246,7 +253,7 @@ const executeWriteFile = async (args: {
 			!(await matchesCurrentReadState(absPath, targetPath))
 		) {
 			invalidateStaleReadState(absPath);
-			throw new Error(staleSnapshotError(args.path));
+			throw new Error(staleReadError(args.path, absPath));
 		}
 	});
 
@@ -618,7 +625,7 @@ const writeFileValidator = async (args: {
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 	if (!existsSync(absPath) && hasSeenFile(absPath)) {
 		invalidateStaleReadState(absPath);
-		return {valid: false, error: staleSnapshotError(args.path)};
+		return {valid: false, error: staleReadError(args.path, absPath)};
 	}
 
 	// Check if parent directory exists
@@ -703,7 +710,7 @@ const writeFileValidator = async (args: {
 			invalidateStaleReadState(absPath);
 			return {
 				valid: false,
-				error: staleSnapshotError(args.path),
+				error: staleReadError(args.path, absPath),
 			};
 		}
 	}

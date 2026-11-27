@@ -326,6 +326,7 @@ test.serial('hasVisibleLines blocks edit when any target line is invisible', t =
 	const check = hasVisibleLines('/tmp/partial-vis.txt', stats, [5, 15]);
 	t.false(check.visible);
 	t.regex(check.error!, /Line 15.*has not been read/);
+	t.regex(check.error!, /start_line: 15 and end_line: 15/);
 });
 
 test.serial('visibility receipts survive generation bump (use invalidateAllVisibilityReceipts)', t => {

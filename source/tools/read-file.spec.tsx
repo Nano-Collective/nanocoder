@@ -98,7 +98,7 @@ test('ReadFileFormatter shows truncated preview range', async t => {
 
 		const element = await formatter(
 			{path: join(testDir, 'large.ts')},
-			`line-1\nline-${FILE_READ_PREVIEW_LINES}\n[Truncated at line ${FILE_READ_PREVIEW_LINES} of 1600. Use read_file with start_line: ${FILE_READ_PREVIEW_LINES + 1} and end_line to continue.]`,
+			`line-1\nline-${FILE_READ_PREVIEW_LINES}\n[Truncated at line ${FILE_READ_PREVIEW_LINES} of 1600. Use read_file with start_line: ${FILE_READ_PREVIEW_LINES + 1} and end_line: 1600 to continue.]`,
 		);
 		const {lastFrame} = render(
 			<TestThemeProvider>{element}</TestThemeProvider>,
