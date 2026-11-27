@@ -332,6 +332,7 @@ async function runPlainConversationBody(
 						nonInteractiveMode: true,
 						nonInteractiveAlwaysAllow,
 						nativeToolsDisabled: getTuneToolMode(tune) !== 'native',
+						modelParameters: tune?.enabled ? tune.modelParameters : undefined,
 					},
 				};
 			},
