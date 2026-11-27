@@ -3,6 +3,7 @@ export {
 	getModelContextLimit,
 	getModelPricing,
 	getSessionContextLimit,
+	isValidModelPricingOverride,
 	resetSessionContextLimit,
 	resolveModelContextLimit,
 	setSessionContextLimit,

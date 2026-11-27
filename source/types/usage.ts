@@ -23,6 +23,8 @@ export interface ResponseUsage {
 	cacheWriteTokens?: number;
 	/** Estimated cost of this API call in USD; omitted when pricing is unknown. */
 	cost?: number;
+	/** Whether the rate came from provider config or the models.dev estimate. */
+	costSource?: 'configured' | 'estimated';
 }
 
 /**
@@ -31,5 +33,7 @@ export interface ResponseUsage {
 export interface CostBreakdown {
 	currentContext: number; // Cost of current context window
 	cumulativeSession: number; // Session total spend
+	currentContextSource?: 'configured' | 'estimated';
+	cumulativeSessionSource?: 'configured' | 'estimated' | 'mixed';
 	perProvider?: Record<string, number>; // Per-provider subtotals
 }

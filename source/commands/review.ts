@@ -753,6 +753,8 @@ export function createReviewView(
 				const usage = showUsageFooter
 					? await buildResponseUsageBounded(response.usage, metadata.model, {
 							baseURL: client.getProviderConfig().config.baseURL,
+							pricingOverride:
+								client.getProviderConfig().pricing?.[metadata.model],
 						})
 					: undefined;
 				// Rendered like a normal chat reply so the review's Markdown is

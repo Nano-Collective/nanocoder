@@ -6,7 +6,11 @@
 import {request} from 'undici';
 import {TIMEOUT_HTTP_BODY_MS, TIMEOUT_HTTP_HEADERS_MS} from '@/constants';
 import {defineSessionValue} from '@/services/session-context';
-import type {AIProviderConfig, ProviderConfig} from '@/types/config';
+import type {
+	AIProviderConfig,
+	ModelPricingConfig,
+	ProviderConfig,
+} from '@/types/config';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
 import {parseContextLimit} from '@/utils/parse-context-limit';
@@ -636,6 +640,23 @@ export async function getModelAcceptsImages(
  */
 const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
 
+export function isValidModelPricingOverride(
+	pricing: ModelPricingConfig | undefined,
+): pricing is ModelPricingConfig {
+	return Boolean(
+		pricing &&
+			(pricing.currency === undefined || pricing.currency === 'USD') &&
+			Number.isFinite(pricing.input) &&
+			pricing.input >= 0 &&
+			Number.isFinite(pricing.output) &&
+			pricing.output >= 0 &&
+			(pricing.cacheRead === undefined ||
+				(Number.isFinite(pricing.cacheRead) && pricing.cacheRead >= 0)) &&
+			(pricing.cacheWrite === undefined ||
+				(Number.isFinite(pricing.cacheWrite) && pricing.cacheWrite >= 0)),
+	);
+}
+
 /**
  * Get pricing for a model in USD per 1M tokens.
  * Returns { input, output } from the cached models.dev database,
@@ -643,7 +664,20 @@ const pricingMemo = new Map<string, ModelInfo['cost'] | null>();
  */
 export async function getModelPricing(
 	modelId: string,
+	configuredPricing?: ModelPricingConfig,
 ): Promise<ModelInfo['cost'] | null> {
+	if (isValidModelPricingOverride(configuredPricing)) {
+		return {
+			input: configuredPricing.input,
+			output: configuredPricing.output,
+			...(configuredPricing.cacheRead !== undefined
+				? {cache_read: configuredPricing.cacheRead}
+				: {}),
+			...(configuredPricing.cacheWrite !== undefined
+				? {cache_write: configuredPricing.cacheWrite}
+				: {}),
+		};
+	}
 	const memoized = pricingMemo.get(modelId);
 	if (memoized !== undefined) {
 		return memoized;

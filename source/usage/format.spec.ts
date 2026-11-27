@@ -104,14 +104,26 @@ test('getTotalTokens returns null when nothing usable is reported', t => {
 test('formatUsageIndicator renders tokens and cost', t => {
 	t.is(
 		formatUsageIndicator({inputTokens: 4100, outputTokens: 100, cost: 0.012}),
-		'Tokens: 4.2k | ~$0.01',
+		'Tokens: 4.2k | ~$0.01 (estimated)',
+	);
+});
+
+test('formatUsageIndicator marks configured pricing', t => {
+	t.is(
+		formatUsageIndicator({
+			inputTokens: 1000,
+			outputTokens: 100,
+			cost: 0.012,
+			costSource: 'configured',
+		}),
+		'Tokens: 1.1k | ~$0.01 (configured)',
 	);
 });
 
 test('formatUsageIndicator renders sub-cent cost', t => {
 	t.is(
 		formatUsageIndicator({totalTokens: 900, cost: 0.0004}),
-		'Tokens: 900 | <$0.01',
+		'Tokens: 900 | <$0.01 (estimated)',
 	);
 });
 
@@ -133,7 +145,7 @@ test('formatUsageIndicator reports cached tokens when the provider read from cac
 			cacheReadTokens: 9800,
 			cost: 0.02,
 		}),
-		'Tokens: 12.4k | 9.8k cached (82%) | ~$0.02',
+		'Tokens: 12.4k | 9.8k cached (82%) | ~$0.02 (estimated)',
 	);
 });
 

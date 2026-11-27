@@ -598,6 +598,23 @@ test('getModelPricing - returns null for unknown model', async t => {
 	t.is(pricing, null);
 });
 
+test('getModelPricing - configured pricing overrides catalogue and unknown models', async t => {
+	t.deepEqual(
+		await getModelPricing('unknown-configured-model', {
+			input: 1.2,
+			output: 4,
+			cacheRead: 0.12,
+			cacheWrite: 1.5,
+			currency: 'USD',
+		}),
+		{input: 1.2, output: 4, cache_read: 0.12, cache_write: 1.5},
+	);
+	t.deepEqual(await getModelPricing('gpt-4o', {input: 2, output: 3}), {
+		input: 2,
+		output: 3,
+	});
+});
+
 test('getModelPricing - returns null for empty string', async t => {
 	const pricing = await getModelPricing('');
 	t.is(pricing, null);

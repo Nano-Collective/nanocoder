@@ -510,6 +510,7 @@ export const processAssistantResponse = async (
 						cacheReadTokens: usage.cacheReadTokens,
 						cacheWriteTokens: usage.cacheWriteTokens,
 						baseURL: client.getProviderConfig().config.baseURL,
+						pricingOverride: client.getProviderConfig().pricing?.[currentModel],
 						timestamp: Date.now(),
 					});
 				}
@@ -584,6 +585,8 @@ export const processAssistantResponse = async (
 					const responseUsage = showUsageFooter
 						? await buildResponseUsageBounded(turnUsage, currentModel, {
 								baseURL: client.getProviderConfig().config.baseURL,
+								pricingOverride:
+									client.getProviderConfig().pricing?.[currentModel],
 							})
 						: undefined;
 					addToChatQueue(

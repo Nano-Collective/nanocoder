@@ -123,7 +123,11 @@ export function formatUsageIndicator(usage: ResponseUsage): string | null {
 	}
 	const cost = usage.cost != null ? formatCost(usage.cost) : null;
 	if (cost) {
-		parts.push(cost);
+		parts.push(
+			usage.costSource === 'configured'
+				? `${cost} (configured)`
+				: `${cost} (estimated)`,
+		);
 	}
 	return parts.join(' | ');
 }

@@ -10,6 +10,7 @@
  */
 
 import type {ModelInfo} from '@/models/models-types';
+import type {ModelPricingConfig} from '@/types/config';
 import {getShutdownManager} from '@/utils/shutdown';
 import {toLocalDateKey} from './date-utils';
 import {
@@ -229,6 +230,7 @@ export type ApiUsageLike = {
 	cacheReadTokens?: number;
 	cacheWriteTokens?: number;
 	baseURL?: string;
+	pricingOverride?: ModelPricingConfig;
 };
 
 /**
@@ -239,6 +241,7 @@ export async function recordApiCallForStats(
 	record: ApiUsageLike,
 	options?: {
 		dateKey?: string;
+		pricingOverride?: ModelPricingConfig;
 		getPricing?: (model: string) => Promise<ModelInfo['cost'] | null>;
 	},
 ): Promise<void> {
@@ -254,7 +257,11 @@ export async function recordApiCallForStats(
 				cacheWriteTokens: record.cacheWriteTokens,
 			},
 			record.model,
-			{getPricing: options?.getPricing, baseURL: record.baseURL},
+			{
+				getPricing: options?.getPricing,
+				baseURL: record.baseURL,
+				pricingOverride: options?.pricingOverride ?? record.pricingOverride,
+			},
 		);
 		// A reset may have happened while pricing was resolving. Do not let a
 		// pre-reset request repopulate the freshly cleared ledger.

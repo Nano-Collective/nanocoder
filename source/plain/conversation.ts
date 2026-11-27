@@ -274,6 +274,10 @@ async function runPlainConversationBody(
 				cacheReadTokens: cacheReadTokens ?? undefined,
 				cacheWriteTokens: cacheWriteTokens ?? undefined,
 				baseURL: client.getProviderConfig().config.baseURL,
+				pricingOverride:
+					client.getProviderConfig().pricing?.[
+						options.model ?? client.getCurrentModel()
+					],
 			});
 		} catch {
 			// Stats must never fail the plain loop.
