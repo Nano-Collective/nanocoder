@@ -310,6 +310,7 @@ const makeSession = (
 	id: string,
 	title: string,
 	messageCount: number,
+	pinned = false,
 ): SessionMetadata => ({
 	id,
 	title,
@@ -319,11 +320,13 @@ const makeSession = (
 	provider: 'test',
 	model: 'test',
 	workingDirectory: process.cwd(),
+	pinned,
 });
 
 const stubSessions: SessionMetadata[] = [
 	makeSession('a', 'Fix login bug', 3),
 	makeSession('b', 'Refactor parser', 2),
+	makeSession('c', 'Pinned release notes', 1, true),
 ];
 
 // Serial: these swap the sessionManager singleton's listSessions.
@@ -442,6 +445,103 @@ test.serial('session-selector cancels once on Escape while the list is shown', a
 		await waitUntil(() => cancelCount > 0);
 		await new Promise(resolve => setTimeout(resolve, 50));
 		t.is(cancelCount, 1);
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector marks pinned sessions in the list', async t => {
+	const {frame, restore} = renderWithStubbedSessions();
+	try {
+		await waitUntil(() => frame().includes('Pinned release notes'));
+		t.regex(frame(), /\[pinned\] Pinned release notes/);
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector shows delete and pin hints when actions exist', async t => {
+	const {frame, restore} = renderWithStubbedSessions({
+		onDeleteSession: () => {},
+		onPinSession: () => {},
+	});
+	try {
+		await waitUntil(() => frame().includes('Ctrl+D delete'));
+		t.regex(frame(), /Ctrl\+P pin/);
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector toggles a pin with Ctrl+P', async t => {
+	const calls: Array<[string, boolean]> = [];
+	const {stdin, frame, restore} = renderWithStubbedSessions({
+		onPinSession: (id, pinned) => {
+			calls.push([id, pinned]);
+		},
+	});
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+		await typeFilter(stdin, frame, 'parser');
+		await waitUntil(() => frame().includes('Refactor parser'));
+
+		stdin.write('\u0010'); // Ctrl+P
+		await waitUntil(() => calls.length === 1);
+		t.deepEqual(calls, [['b', true]]);
+		await waitUntil(() => frame().includes('[pinned] Refactor parser'));
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector asks before deleting and honours n', async t => {
+	const deleted: string[] = [];
+	const {stdin, frame, restore} = renderWithStubbedSessions({
+		onDeleteSession: id => {
+			deleted.push(id);
+		},
+	});
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+		await typeFilter(stdin, frame, 'parser');
+		await waitUntil(() => frame().includes('Refactor parser'));
+
+		stdin.write('\u0004'); // Ctrl+D
+		await waitUntil(() => frame().includes('Delete "Refactor parser"?'));
+		t.deepEqual(deleted, []);
+
+		stdin.write('n');
+		await waitUntil(
+			() =>
+				frame().includes('Refactor parser') &&
+				!frame().includes('Delete "Refactor parser"?'),
+		);
+		t.deepEqual(deleted, []);
+	} finally {
+		restore();
+	}
+});
+
+test.serial('session-selector deletes the highlighted session after y', async t => {
+	const deleted: string[] = [];
+	const {stdin, frame, restore} = renderWithStubbedSessions({
+		onDeleteSession: id => {
+			deleted.push(id);
+		},
+	});
+	try {
+		await waitUntil(() => frame().includes('Fix login bug'));
+		await typeFilter(stdin, frame, 'parser');
+		await waitUntil(() => frame().includes('Refactor parser'));
+
+		stdin.write('\u0004'); // Ctrl+D
+		await waitUntil(() => frame().includes('Delete "Refactor parser"?'));
+		t.deepEqual(deleted, []);
+
+		stdin.write('y');
+		await waitUntil(() => deleted.length === 1);
+		t.deepEqual(deleted, ['b']);
+		await waitUntil(() => !frame().includes('Refactor parser'));
 	} finally {
 		restore();
 	}

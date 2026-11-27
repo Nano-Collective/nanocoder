@@ -193,7 +193,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'resume',
 		description:
-			'List and resume previous chat sessions. Aliases: /sessions, /history',
+			'List, resume, delete or pin chat sessions. Aliases: /sessions, /history',
 		load: () => import('@/commands/resume').then(m => m.resumeCommand),
 	},
 	{

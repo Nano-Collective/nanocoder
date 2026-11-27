@@ -169,6 +169,8 @@ export interface AppHandlers {
 	applySession: (session: Session) => void;
 	handleSessionSelect: (sessionId: string) => Promise<void>;
 	handleSessionCancel: () => void;
+	deleteSession: (sessionId: string) => Promise<void>;
+	setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
 	enterCheckpointLoadMode: (
 		checkpoints: CheckpointListItem[],
 		currentMessageCount: number,
@@ -720,6 +722,32 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		setActiveMode(null);
 	}, [setActiveMode]);
 
+	// CLI counterpart of ACP's session/delete. Stopping the jobs matters even
+	// for an inactive session: a deleted session must not leave background
+	// work running under an id that no longer exists. Deleting the live session
+	// also clears the conversation, so autosave cannot resurrect it.
+	const deleteSession = React.useCallback(
+		async (sessionId: string) => {
+			await sessionManager.initialize();
+			await bashExecutor.stopSessionJobs(sessionId);
+			await sessionManager.deleteSession(sessionId);
+			if (sessionId === currentSessionId) {
+				await clearMessages();
+				onClearCounterIncrement?.();
+				setActiveMode(null);
+			}
+		},
+		[currentSessionId, clearMessages, onClearCounterIncrement, setActiveMode],
+	);
+
+	const setSessionPinned = React.useCallback(
+		async (sessionId: string, pinned: boolean) => {
+			await sessionManager.initialize();
+			await sessionManager.setPinned(sessionId, pinned);
+		},
+		[],
+	);
+
 	// Plan review action bar handlers
 	const handlePlanProceed = React.useCallback(async () => {
 		// Approving must always be able to proceed. A missing session id or an
@@ -1048,6 +1076,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onEnterCheckpointLoadMode: enterCheckpointLoadMode,
 					onEnterSessionSelectorMode: enterSessionSelectorMode,
 					onResumeSession: resumeSession,
+					onDeleteSession: deleteSession,
+					onSetSessionPinned: setSessionPinned,
 					onShowStatus: handleShowStatus,
 					onHandleChatMessage: handleChatMessage,
 					onSwitchModel: handleModelSelect,
@@ -1112,6 +1142,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			enterCheckpointLoadMode,
 			handleShowStatus,
 			resumeSession,
+			deleteSession,
+			setSessionPinned,
 			enterSessionSelectorMode,
 			onClearCounterIncrement,
 			setLiveComponentCapturesInput,
@@ -1137,6 +1169,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			applySession,
 			handleSessionSelect,
 			handleSessionCancel,
+			deleteSession,
+			setSessionPinned,
 			handleMessageSubmit,
 			handlePlanProceed,
 			handlePlanAskMore,
@@ -1157,6 +1191,8 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			applySession,
 			handleSessionSelect,
 			handleSessionCancel,
+			deleteSession,
+			setSessionPinned,
 			handleMessageSubmit,
 			handlePlanProceed,
 			handlePlanAskMore,
