@@ -194,7 +194,7 @@ test('checkForUpdates: handles version with v prefix', async t => {
 	t.is(result.latestVersion, newerMajorVersion);
 });
 
-test('checkForUpdates: handles pre-release versions', async t => {
+test('checkForUpdates: detects a newer pre-release version', async t => {
 	// Use a newer major version with pre-release tag
 	const currentParts = CURRENT_VERSION.split('.');
 	const newerPreReleaseVersion = `${parseInt(currentParts[0]) + 1}.0.0-beta.1`;
@@ -206,7 +206,7 @@ test('checkForUpdates: handles pre-release versions', async t => {
 
 	const result = await checkForUpdates();
 
-	// Pre-release info is stripped during comparison
+	// The pre-release tag does not hide the newer major version.
 	t.true(result.hasUpdate);
 	t.is(result.latestVersion, newerPreReleaseVersion);
 });

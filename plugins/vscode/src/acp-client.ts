@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {ClientSideConnection} from '@agentclientprotocol/sdk';
 import {ACP_EXT_PREFIX, type ACP_EXT_METHODS, VSCODE_CLIENT_NAME} from '../../../source/acp/acp-capabilities';
+import {isNewerVersion} from '../../../source/utils/version-compare';
 import {AcpStateManager, ACPStatus} from './acp-state';
 import {PromptAttempt} from './prompt-attempt';
 import { resolveExtensionCwd } from './workspace-utils';
@@ -549,15 +550,7 @@ export class NanocoderAcpClient {
 	}
 
 	private isVersionIncompatible(serverVersion: string): boolean {
-		const parseVersion = (v: string) => v.split('.').map(n => parseInt(n, 10) || 0);
-		const [sMajor, sMinor, sPatch] = parseVersion(serverVersion);
-		const [rMajor, rMinor, rPatch] = parseVersion(MINIMUM_CLI_VERSION);
-
-		if (sMajor < rMajor) return true;
-		if (sMajor === rMajor && sMinor < rMinor) return true;
-		if (sMajor === rMajor && sMinor === rMinor && sPatch < rPatch) return true;
-		
-		return false; 
+		return isNewerVersion(serverVersion, MINIMUM_CLI_VERSION);
 	}
 
 	async listSessions(): Promise<Array<{sessionId: string; cwd: string; title?: string | null; updatedAt?: string | null}>> {
