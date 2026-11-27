@@ -19,6 +19,9 @@ import {
 import type {DevelopmentMode} from '../../types/core.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {fileOpTool} from './file-op.js';
+import {readFileTool} from '../read-file.js';
+import {writeFileTool} from './write-file.js';
+import {clearReadTracker, hasFileSnapshot, hasSeenFile} from '../runtime/read-tracker.js';
 
 function TestThemeProvider({children}: {children: React.ReactNode}) {
 	const themeContextValue = {
@@ -86,6 +89,7 @@ let workspace: string;
 
 test.beforeEach(async () => {
 	workspace = await mkdtemp(join(tmpdir(), 'file-op-approval-'));
+	clearReadTracker();
 	setSessionCwd(workspace);
 	await writeFile(join(workspace, 'greet.py'), "print('Hello, Agent!')\n");
 	await writeFile(join(workspace, 'other.py'), "print('other')\n");
@@ -200,6 +204,52 @@ test('file_op approval: mkdir runs in auto-accept', async t => {
 const runFileOp = (args: Record<string, unknown>): Promise<string> =>
 	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
 	(fileOpTool.tool as any).execute(args, {toolCallId: 'test', messages: []});
+
+const runReadFile = (path: string): Promise<unknown> =>
+	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
+	(readFileTool.tool as any).execute({path}, {toolCallId: 'test', messages: []});
+
+test.serial('file_op delete clears stale read and snapshot state for the deleted path', async t => {
+	const absPath = join(workspace, 'greet.py');
+	setProjectRoot(workspace);
+	await runReadFile('greet.py');
+	t.true(hasSeenFile(absPath));
+	t.true(hasFileSnapshot(absPath));
+
+	await runFileOp({operation: 'delete', path: 'greet.py'});
+
+	t.false(hasSeenFile(absPath));
+	t.false(hasFileSnapshot(absPath));
+	t.true((await writeFileTool.validator!({path: 'greet.py', content: 'new\n'})).valid);
+	await writeFile(join(workspace, 'greet.py'), 'new\n', 'utf-8');
+	const overwrite = await writeFileTool.validator!({path: 'greet.py', content: 'again\n'});
+	t.false(overwrite.valid);
+	if (!overwrite.valid) t.regex(overwrite.error, /you have not read it this session/i);
+});
+
+test.serial('file_op move clears source read and snapshot state', async t => {
+	const source = join(workspace, 'greet.py');
+	const destination = join(workspace, 'moved.py');
+	setProjectRoot(workspace);
+	await runReadFile('greet.py');
+	t.true(hasFileSnapshot(source));
+
+	await runFileOp({operation: 'move', path: 'greet.py', destination: 'moved.py'});
+
+	t.false(hasSeenFile(source));
+	t.false(hasFileSnapshot(source));
+	t.false(hasSeenFile(destination));
+	t.false(hasFileSnapshot(destination));
+	t.true((await writeFileTool.validator!({path: 'greet.py', content: 'new\n'})).valid);
+	const destinationOverwrite = await writeFileTool.validator!({
+		path: 'moved.py',
+		content: 'replacement\n',
+	});
+	t.false(destinationOverwrite.valid);
+	if (!destinationOverwrite.valid) {
+		t.regex(destinationOverwrite.error, /you have not read it this session/i);
+	}
+});
 
 test.serial('file_op firewall: strict mode refuses to delete a protected file', async t => {
 	setProjectRoot(workspace);

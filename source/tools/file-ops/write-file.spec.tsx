@@ -19,14 +19,22 @@ import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../../config/themes.js';
+import {
+	FILE_READ_PREVIEW_LINES,
+	FILE_READ_PREVIEW_THRESHOLD_LINES,
+} from '../../constants.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {writeFileTool} from './write-file.js';
+import {stringReplaceTool} from './string-replace.js';
+import {diffEditTool} from './diff-edit.js';
 import {
 	clearReadTracker,
+	hasFileSnapshot,
 	markFileSeenAndVisible,
 } from '../runtime/read-tracker.js';
 import {readFileTool} from '../read-file.js';
+import {withValidation} from '../runtime/tool-validation.js';
 import {setRenameForTests} from '../../utils/fs/atomic-write.js';
 import {
 	resetFirewallConfig,
@@ -98,6 +106,21 @@ async function executeWriteFileWithoutRead(args: {
 		toolCallId: 'test',
 		messages: [],
 	});
+}
+
+async function executeValidatedWriteFile(args: {
+	path: string;
+	content: string;
+}): Promise<string> {
+	const handler = withValidation(
+		input =>
+			(writeFileTool.tool as any).execute(input, {
+				toolCallId: 'test',
+				messages: [],
+			}),
+		writeFileTool.validator,
+	);
+	return await handler(args, {toolCallId: 'test', messages: []});
 }
 
 async function executeReadFile(args: {
@@ -346,7 +369,7 @@ test('write_file validator: allows overwriting an existing file after it is read
 	}
 });
 
-test.serial('write_file validator requires one complete read after separate ranges cover the file', async t => {
+test.serial('write_file allows overwriting after separate reads cover the whole file', async t => {
 	await writeFile(join(testDir, 'ranged.txt'), 'one\ntwo\nthree\n', 'utf-8');
 	const originalCwd = process.cwd();
 	try {
@@ -354,12 +377,198 @@ test.serial('write_file validator requires one complete read after separate rang
 		await executeReadFile({path: 'ranged.txt', start_line: 1, end_line: 2});
 		await executeReadFile({path: 'ranged.txt', start_line: 3, end_line: 4});
 
-		const result = await writeFileTool.validator!({
+		const args = {
 			path: 'ranged.txt',
 			content: 'replacement\n',
+		};
+		const result = await writeFileTool.validator!(args);
+		t.true(result.valid);
+		await executeWriteFileWithoutRead(args);
+		t.is(await readFile(join(testDir, 'ranged.txt'), 'utf-8'), args.content);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file keeps full-file visibility after a later ranged read', async t => {
+	const filePath = join(testDir, 'write-then-range.txt');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeWriteFileWithoutRead({
+			path: 'write-then-range.txt',
+			content: 'first\nsecond\nthird\n',
+		});
+		await executeReadFile({path: 'write-then-range.txt', start_line: 1, end_line: 1});
+
+		t.deepEqual(
+			await stringReplaceTool.validator!({
+				path: 'write-then-range.txt',
+				old_str: 'third',
+				new_str: 'THIRD',
+			}),
+			{valid: true},
+		);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file allows overwriting after reading a large-file preview and remainder', async t => {
+	const totalLines = FILE_READ_PREVIEW_THRESHOLD_LINES + 20;
+	const content = Array.from({length: totalLines}, (_, index) => `line-${index + 1}`).join('\n');
+	await writeFile(join(testDir, 'large-ranged.txt'), content, 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'large-ranged.txt'});
+		await executeReadFile({
+			path: 'large-ranged.txt',
+			start_line: FILE_READ_PREVIEW_LINES + 1,
+			end_line: totalLines,
+		});
+
+		const args = {
+			path: 'large-ranged.txt',
+			content: 'replacement after the full visible read\n',
+		};
+		const result = await writeFileTool.validator!(args);
+		t.true(result.valid);
+		await executeWriteFileWithoutRead(args);
+		t.is(await readFile(join(testDir, 'large-ranged.txt'), 'utf-8'), args.content);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file validator: rejects stale content after full ranged reads without a snapshot', async t => {
+	const filePath = join(testDir, 'ranged-stale.txt');
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	await writeFile(filePath, 'original\nsecond\n', 'utf-8');
+	await utimes(filePath, fixedTime, fixedTime);
+
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'ranged-stale.txt', start_line: 1, end_line: 1});
+		await executeReadFile({path: 'ranged-stale.txt', start_line: 2, end_line: 3});
+		t.false(hasFileSnapshot(filePath));
+
+		const originalStats = await stat(filePath);
+		await writeFile(filePath, 'external\nsecond\n', 'utf-8');
+		await utimes(filePath, fixedTime, fixedTime);
+		const changedStats = await stat(filePath);
+		t.is(changedStats.size, originalStats.size);
+		t.is(changedStats.mtimeMs, originalStats.mtimeMs);
+
+		const result = await writeFileTool.validator!({
+			path: 'ranged-stale.txt',
+			content: 'agent replacement\n',
 		});
 		t.false(result.valid);
-		if (!result.valid) t.regex(result.error, /Read all of .* in one read_file call/);
+		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
+		const retry = await writeFileTool.validator!({
+			path: 'ranged-stale.txt',
+			content: 'agent replacement\n',
+		});
+		t.false(retry.valid);
+		t.is(await readFile(filePath, 'utf-8'), 'external\nsecond\n');
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file does not recreate a file deleted while approval was open after ranged reads', async t => {
+	const filePath = join(testDir, 'ranged-deleted.txt');
+	await writeFile(filePath, 'first\nsecond\n', 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'ranged-deleted.txt', start_line: 1, end_line: 1});
+		await executeReadFile({path: 'ranged-deleted.txt', start_line: 2, end_line: 3});
+
+		const validation = await writeFileTool.validator!({
+			path: 'ranged-deleted.txt',
+			content: 'agent replacement\n',
+		});
+		t.true(validation.valid);
+
+		await rm(filePath);
+		await t.throwsAsync(
+			executeValidatedWriteFile({
+				path: 'ranged-deleted.txt',
+				content: 'agent replacement\n',
+			}),
+			{message: /changed since it was fully read/},
+		);
+		t.false(existsSync(filePath));
+		// After the stale-read warning, a deliberate retry may create the now-
+		// missing file; the first execution must not silently recreate it.
+		t.true(
+			(
+				await writeFileTool.validator!({
+					path: 'ranged-deleted.txt',
+					content: 'agent replacement\n',
+				})
+			).valid,
+		);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file allows a follow-up overwrite after string_replace', async t => {
+	const filePath = join(testDir, 'agent-string-edit.txt');
+	await writeFile(filePath, 'first\nsecond\nthird\n', 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'agent-string-edit.txt'});
+		const edit = {path: 'agent-string-edit.txt', old_str: 'second', new_str: 'updated'};
+		const validation = await stringReplaceTool.validator!(edit);
+		t.true(validation.valid);
+		await (stringReplaceTool.tool as any).execute(edit, {
+			toolCallId: 'test',
+			messages: [],
+		});
+
+		const write = {path: 'agent-string-edit.txt', content: 'complete replacement\n'};
+		t.true((await writeFileTool.validator!(write)).valid);
+		await executeWriteFileWithoutRead(write);
+		t.is(await readFile(filePath, 'utf-8'), write.content);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file allows a follow-up overwrite after diff_edit', async t => {
+	const filePath = join(testDir, 'agent-diff-edit.txt');
+	await writeFile(filePath, 'first\nsecond\nthird\n', 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'agent-diff-edit.txt'});
+		const edit = {
+			path: 'agent-diff-edit.txt',
+			diff: [
+				'<<<<<<< SEARCH',
+				'second',
+				'=======',
+				'updated',
+				'>>>>>>> REPLACE',
+			].join('\n'),
+		};
+		const validation = await diffEditTool.validator!(edit);
+		t.true(validation.valid);
+		await (diffEditTool.tool as any).execute(edit, {
+			toolCallId: 'test',
+			messages: [],
+		});
+
+		const write = {path: 'agent-diff-edit.txt', content: 'complete replacement\n'};
+		t.true((await writeFileTool.validator!(write)).valid);
+		await executeWriteFileWithoutRead(write);
+		t.is(await readFile(filePath, 'utf-8'), write.content);
 	} finally {
 		process.chdir(originalCwd);
 	}
@@ -1535,7 +1744,7 @@ test.serial('write_file validator: refuses same-size content changes with a rest
 	}
 });
 
-test.serial('write_file validator: refuses a replaced target even when its bytes and mtime match', async t => {
+test.serial('write_file allows a replaced target when its bytes and mtime match', async t => {
 	const filePath = join(testDir, 'replaced-target.txt');
 	const replacementPath = join(testDir, 'replacement.tmp');
 	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
@@ -1555,9 +1764,12 @@ test.serial('write_file validator: refuses a replaced target even when its bytes
 			path: 'replaced-target.txt',
 			content: 'agent version\n',
 		});
-		t.false(result.valid);
-		if (!result.valid) t.regex(result.error, /changed since it was fully read/);
-		t.is(await readFile(filePath, 'utf-8'), 'original\n');
+		t.true(result.valid);
+		await executeValidatedWriteFile({
+			path: 'replaced-target.txt',
+			content: 'agent version\n',
+		});
+		t.is(await readFile(filePath, 'utf-8'), 'agent version\n');
 	} finally {
 		process.chdir(originalCwd);
 	}
@@ -1585,7 +1797,7 @@ test.serial('write_file rechecks the file after approval before overwriting it',
 		await utimes(filePath, fixedTime, fixedTime);
 
 		await t.throwsAsync(
-			executeWriteFileWithoutRead({
+			executeValidatedWriteFile({
 				path: 'approval-race.txt',
 				content: 'agent version\n',
 			}),
@@ -1610,11 +1822,11 @@ test.serial('write_file refuses to overwrite a path that appeared after approval
 
 		await writeFile(filePath, 'user version\n', 'utf-8');
 		await t.throwsAsync(
-			executeWriteFileWithoutRead({
+			executeValidatedWriteFile({
 				path: 'appeared-after-approval.txt',
 				content: 'agent version\n',
 			}),
-			{message: /changed since it was fully read/},
+			{message: /you have not read it this session/i},
 		);
 		t.is(await readFile(filePath, 'utf-8'), 'user version\n');
 	} finally {

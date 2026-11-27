@@ -150,10 +150,10 @@ const executeReadFile = async (args: {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
 			if (!cached.derived && !cached.notUtf8) {
-				rememberFileSnapshot(absPath, content, stats);
+				rememberFileSnapshot(absPath, content);
 			}
 			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
-			recordVisibilityReceipt(absPath, stats, undefined, undefined);
+			recordVisibilityReceipt(absPath, stats, undefined, undefined, content);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -183,7 +183,7 @@ const executeReadFile = async (args: {
 				args.end_line,
 			);
 			// Record visibility receipt for the preview lines shown
-			recordVisibilityReceipt(absPath, stats, 1, previewEndLine);
+			recordVisibilityReceipt(absPath, stats, 1, previewEndLine, content);
 
 			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
 		}
@@ -208,7 +208,7 @@ const executeReadFile = async (args: {
 			args.end_line,
 		);
 		// Record visibility receipt for the actual lines returned
-		recordVisibilityReceipt(absPath, stats, startLine, endLine);
+		recordVisibilityReceipt(absPath, stats, startLine, endLine, content);
 		// Only a complete, editable text body proves the exact version needed by
 		// write_file. A preview or range read may still authorize bounded edits,
 		// but it cannot safely authorize a whole-file replacement.
@@ -218,7 +218,7 @@ const executeReadFile = async (args: {
 			!cached.derived &&
 			!cached.notUtf8
 		) {
-			rememberFileSnapshot(absPath, content, stats);
+			rememberFileSnapshot(absPath, content);
 		}
 
 		// Return content without line numbers for clean content-based editing

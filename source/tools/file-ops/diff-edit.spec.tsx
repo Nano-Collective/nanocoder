@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, utimes, writeFile} from 'node:fs/promises';
 import {join, relative} from 'node:path';
 import test from 'ava';
 import {render} from 'ink-testing-library';
@@ -8,6 +8,7 @@ import {MAX_CACHEABLE_FILE_SIZE_BYTES} from '../../constants.js';
 import {ThemeContext} from '../../hooks/useTheme.js';
 import {resolveToolApproval} from '../approval-policy.js';
 import {clearReadTracker, markFileSeenAndVisible} from '../runtime/read-tracker.js';
+import {readFileTool} from '../read-file.js';
 import {diffEditTool, parseDiffEditBlocks} from './diff-edit.js';
 import {
 	resetFirewallConfig,
@@ -703,4 +704,28 @@ test.serial('diff_edit: a file changed outside after the read is refused', async
 	});
 	t.false(result.valid);
 	if (!result.valid) t.regex(result.error, /modified externally/);
+});
+
+test.serial('diff_edit refuses same-size external edits with restored mtime', async t => {
+	const filePath = await createTestFile('same-metadata.txt', 'alpha\nvalue\n');
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	await utimes(filePath, fixedTime, fixedTime);
+	await readFileTool.tool.execute!(
+		{path: projectRelativePath(filePath)},
+		{toolCallId: 'test', messages: []},
+	);
+
+	await writeFile(filePath, 'omega\nvalue\n', 'utf-8');
+	await utimes(filePath, fixedTime, fixedTime);
+	const args = {
+		path: projectRelativePath(filePath),
+		diff: diffBlock('value', 'VALUE'),
+	};
+	const validation = await diffEditTool.validator!(args);
+	t.true(validation.valid);
+
+	await t.throwsAsync(executeDiffEdit(args), {
+		message: /changed since it was read/i,
+	});
+	t.is(await readFile(filePath, 'utf-8'), 'omega\nvalue\n');
 });

@@ -28,7 +28,7 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import {
-	forgetFileSnapshot,
+	forgetFileState,
 	forgetReadContent,
 	forgetVisibilityReceipt,
 	hasFileSnapshot,
@@ -36,6 +36,7 @@ import {
 	hasVisibleLines,
 	markFileSeen,
 	matchesFileSnapshot,
+	matchesVisibilityContent,
 	recordVisibilityReceipt,
 	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
@@ -62,13 +63,11 @@ import {
 // never runs).
 const previousContentCache = new Map<string, string | null>();
 
-/** Read a target through an open handle and verify the path still names it. */
-async function matchesCurrentFileSnapshot(
+/** Check the full snapshot when present; otherwise verify scoped visibility and version. */
+async function matchesCurrentReadState(
 	absPath: string,
 	expectedTargetPath?: string,
-): Promise<boolean | undefined> {
-	if (!hasFileSnapshot(absPath)) return undefined;
-	let handle: Awaited<ReturnType<typeof open>> | undefined;
+): Promise<boolean> {
 	try {
 		if (
 			expectedTargetPath !== undefined &&
@@ -77,31 +76,71 @@ async function matchesCurrentFileSnapshot(
 			return false;
 		}
 
-		handle = await open(absPath, 'r');
-		const fileStats = await handle.stat();
-		const content = await handle.readFile();
-		const pathStats = await stat(absPath);
-		if (fileStats.dev !== pathStats.dev || fileStats.ino !== pathStats.ino) {
-			return false;
+		if (!hasFileSnapshot(absPath)) {
+			const initialStats = await stat(absPath);
+			const cached = await getCachedFileContent(absPath);
+			let handle: Awaited<ReturnType<typeof open>> | undefined;
+			try {
+				handle = await open(absPath, 'r');
+				const fileStats = await handle.stat();
+				const content = await handle.readFile();
+				const currentStats = await stat(absPath);
+				if (
+					initialStats.dev !== fileStats.dev ||
+					initialStats.ino !== fileStats.ino ||
+					initialStats.mtimeMs !== fileStats.mtimeMs ||
+					initialStats.size !== fileStats.size ||
+					fileStats.dev !== currentStats.dev ||
+					fileStats.ino !== currentStats.ino ||
+					fileStats.mtimeMs !== currentStats.mtimeMs ||
+					fileStats.size !== currentStats.size
+				) {
+					return false;
+				}
+				// The cache is process-wide, but visible ranges are agent-scoped.
+				// Compare against the digest captured with this scope's read receipt.
+				if (matchesVisibilityContent(absPath, content) === false) return false;
+				const allLines = Array.from(
+					{length: cached.totalLines},
+					(_, index) => index + 1,
+				);
+				if (!hasVisibleLines(absPath, currentStats, allLines).visible)
+					return false;
+				return (
+					expectedTargetPath === undefined ||
+					(await realpath(absPath)) === expectedTargetPath
+				);
+			} finally {
+				await handle?.close().catch(() => {});
+			}
 		}
-		if (
-			expectedTargetPath !== undefined &&
-			(await realpath(absPath)) !== expectedTargetPath
-		) {
-			return false;
+
+		let handle: Awaited<ReturnType<typeof open>> | undefined;
+		try {
+			handle = await open(absPath, 'r');
+			const fileStats = await handle.stat();
+			const content = await handle.readFile();
+			const pathStats = await stat(absPath);
+			if (fileStats.dev !== pathStats.dev || fileStats.ino !== pathStats.ino) {
+				return false;
+			}
+			if (
+				expectedTargetPath !== undefined &&
+				(await realpath(absPath)) !== expectedTargetPath
+			) {
+				return false;
+			}
+			return matchesFileSnapshot(absPath, content) === true;
+		} finally {
+			await handle?.close().catch(() => {});
 		}
-		return matchesFileSnapshot(absPath, content, fileStats) === true;
 	} catch {
 		return false;
-	} finally {
-		await handle?.close().catch(() => {});
 	}
 }
 
 function invalidateStaleReadState(absPath: string): void {
-	forgetReadContent(absPath);
-	forgetFileSnapshot(absPath);
-	forgetVisibilityReceipt(absPath);
+	forgetFileState(absPath);
 	invalidateCache(absPath);
 }
 
@@ -120,7 +159,7 @@ const executeWriteFile = async (args: {
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 	const fileExists = existsSync(absPath);
-	if (!fileExists && hasFileSnapshot(absPath)) {
+	if (!fileExists && hasSeenFile(absPath)) {
 		invalidateStaleReadState(absPath);
 		throw new Error(staleSnapshotError(args.path));
 	}
@@ -183,9 +222,8 @@ const executeWriteFile = async (args: {
 
 	let expectedTargetPath: string | undefined;
 	if (fileExists) {
-		const snapshotMatches = await matchesCurrentFileSnapshot(absPath);
-		if (snapshotMatches !== true) {
-			if (snapshotMatches === false) invalidateStaleReadState(absPath);
+		if (!(await matchesCurrentReadState(absPath))) {
+			invalidateStaleReadState(absPath);
 			throw new Error(staleSnapshotError(args.path));
 		}
 		expectedTargetPath = await realpath(absPath);
@@ -196,14 +234,16 @@ const executeWriteFile = async (args: {
 			// Do not turn a path that appeared while the approval UI was open into
 			// an unreviewed overwrite.
 			if (existsSync(absPath)) {
-				throw new Error(staleSnapshotError(args.path));
+				throw new Error(
+					`File "${args.path}" appeared after this write was approved. Read it before overwriting it.`,
+				);
 			}
 			return;
 		}
 
 		if (
 			targetPath !== expectedTargetPath ||
-			(await matchesCurrentFileSnapshot(absPath, targetPath)) !== true
+			!(await matchesCurrentReadState(absPath, targetPath))
 		) {
 			invalidateStaleReadState(absPath);
 			throw new Error(staleSnapshotError(args.path));
@@ -221,7 +261,7 @@ const executeWriteFile = async (args: {
 	try {
 		const stats = await lstat(absPath);
 		// Full file visibility (undefined start/end means entire file)
-		recordVisibilityReceipt(absPath, stats, undefined, undefined);
+		recordVisibilityReceipt(absPath, stats, undefined, undefined, content);
 	} catch {
 		// If stat fails, fall back to file-level tracking only
 	}
@@ -231,10 +271,9 @@ const executeWriteFile = async (args: {
 	// arguments, so returning it again is pure duplication).
 	const actualBytes = await readFile(absPath);
 	const actualContent = actualBytes.toString('utf-8');
-	const writtenStats = await stat(absPath);
 	// Store the content we committed, not a later external edit that raced with
-	// the read-back. A subsequent write will compare both bytes and file identity.
-	rememberFileSnapshot(absPath, content, writtenStats);
+	// the read-back.
+	rememberFileSnapshot(absPath, content);
 	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
 	const estimatedTokens = estimateTokens(actualContent);
@@ -577,7 +616,7 @@ const writeFileValidator = async (args: {
 	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
-	if (!existsSync(absPath) && hasFileSnapshot(absPath)) {
+	if (!existsSync(absPath) && hasSeenFile(absPath)) {
 		invalidateStaleReadState(absPath);
 		return {valid: false, error: staleSnapshotError(args.path)};
 	}
@@ -659,15 +698,12 @@ const writeFileValidator = async (args: {
 	}
 
 	if (existsSync(absPath)) {
-		const snapshotMatches = await matchesCurrentFileSnapshot(absPath);
-		if (snapshotMatches !== true) {
-			if (snapshotMatches === false) invalidateStaleReadState(absPath);
+		const snapshotMatches = await matchesCurrentReadState(absPath);
+		if (!snapshotMatches) {
+			invalidateStaleReadState(absPath);
 			return {
 				valid: false,
-				error:
-					snapshotMatches === undefined
-						? `Read all of "${args.path}" in one read_file call before overwriting it, so the exact version can be checked.`
-						: staleSnapshotError(args.path),
+				error: staleSnapshotError(args.path),
 			};
 		}
 	}

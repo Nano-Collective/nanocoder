@@ -42,8 +42,6 @@ type ReadContentScope = {
 
 type FileSnapshot = {
 	digest: string;
-	dev: number;
-	ino: number;
 };
 
 type LineRange = {
@@ -55,6 +53,8 @@ type VisibilityReceipt = {
 	mtimeMs: number;
 	size: number;
 	generation: number;
+	/** Hash of the complete bytes underlying the content shown for these ranges. */
+	contentDigest?: string;
 	/** Line ranges the agent has actually seen. Empty array means full file. */
 	visibleRanges: LineRange[];
 };
@@ -213,12 +213,9 @@ function hashFileContent(content: string | Buffer): string {
 export function rememberFileSnapshot(
 	absPath: string,
 	content: string | Buffer,
-	identity: {dev: number; ino: number},
 ): void {
 	getReadContentScope().fileSnapshots.set(resolve(absPath), {
 		digest: hashFileContent(content),
-		dev: identity.dev,
-		ino: identity.ino,
 	});
 }
 
@@ -232,22 +229,31 @@ export function forgetFileSnapshot(absPath: string): void {
 	getReadContentScope().fileSnapshots.delete(resolve(absPath));
 }
 
+/** Forget all read evidence for a path after a filesystem operation replaces it. */
+export function forgetFileState(absPath: string): void {
+	const path = resolve(absPath);
+	const readContentPrefix = `${path}\0`;
+	seenFiles.delete(path);
+	for (const scope of readContentScopes.values()) {
+		for (const key of scope.files.keys()) {
+			if (key.startsWith(readContentPrefix)) scope.files.delete(key);
+		}
+		scope.fileSnapshots.delete(path);
+		scope.visibilityReceipts.delete(path);
+	}
+}
+
 /**
- * Compare current bytes and target identity with the exact full-file snapshot.
+ * Compare current bytes with the exact full-file snapshot.
  * Undefined means the current scope never received a complete file snapshot.
  */
 export function matchesFileSnapshot(
 	absPath: string,
 	content: string | Buffer,
-	identity: {dev: number; ino: number},
 ): boolean | undefined {
 	const snapshot = getReadContentScope().fileSnapshots.get(resolve(absPath));
 	if (!snapshot) return undefined;
-	return (
-		snapshot.dev === identity.dev &&
-		snapshot.ino === identity.ino &&
-		snapshot.digest === hashFileContent(content)
-	);
+	return snapshot.digest === hashFileContent(content);
 }
 
 /** Clear all tracked files. Called on /clear and exposed for tests. */
@@ -276,10 +282,13 @@ export function recordVisibilityReceipt(
 	stats?: {mtimeMs: number; size: number},
 	startLine?: number,
 	endLine?: number,
+	content?: string | Buffer,
 ): void {
 	const scope = getReadContentScope();
 	const path = resolve(absPath);
 	const existing = scope.visibilityReceipts.get(path);
+	const contentDigest =
+		content === undefined ? undefined : hashFileContent(content);
 
 	// Fetch stats if not provided (for test helpers like markFileSeen)
 	if (!stats) {
@@ -298,6 +307,7 @@ export function recordVisibilityReceipt(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [], // Empty array signals full file visibility
 		});
 		return;
@@ -312,6 +322,7 @@ export function recordVisibilityReceipt(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [newRange],
 		});
 		return;
@@ -323,6 +334,7 @@ export function recordVisibilityReceipt(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [newRange],
 		});
 		return;
@@ -331,6 +343,41 @@ export function recordVisibilityReceipt(
 	// The whole file is already visible (empty list means full file), so a range
 	// read adds nothing. Pushing onto it would turn "full file" into one range.
 	if (existing.visibleRanges.length === 0) {
+		if (
+			contentDigest !== undefined &&
+			existing.contentDigest !== contentDigest
+		) {
+			scope.visibilityReceipts.set(path, {
+				mtimeMs: stats.mtimeMs,
+				size: stats.size,
+				generation: scope.generation,
+				contentDigest,
+				visibleRanges: [newRange],
+			});
+			return;
+		}
+		existing.mtimeMs = stats.mtimeMs;
+		existing.size = stats.size;
+		return;
+	}
+
+	// Same metadata can accompany different bytes (for example, an editor save
+	// followed by restoring the old mtime). Never combine ranges observed from
+	// different versions, or compare one agent's ranges to another agent's cache.
+	if (
+		(existing.contentDigest !== undefined &&
+			contentDigest !== undefined &&
+			existing.contentDigest !== contentDigest) ||
+		(existing.contentDigest === undefined && contentDigest !== undefined) ||
+		(existing.contentDigest !== undefined && contentDigest === undefined)
+	) {
+		scope.visibilityReceipts.set(path, {
+			mtimeMs: stats.mtimeMs,
+			size: stats.size,
+			generation: scope.generation,
+			contentDigest,
+			visibleRanges: [newRange],
+		});
 		return;
 	}
 
@@ -358,10 +405,13 @@ export function recordEditVisibility(
 	startLine: number,
 	oldLineCount: number,
 	newLineCount: number,
+	content?: string | Buffer,
 ): void {
 	const scope = getReadContentScope();
 	const path = resolve(absPath);
 	const existing = scope.visibilityReceipts.get(path);
+	const contentDigest =
+		content === undefined ? undefined : hashFileContent(content);
 	const editedRange: LineRange = {
 		start: startLine,
 		end: startLine + Math.max(newLineCount, 1) - 1,
@@ -373,6 +423,7 @@ export function recordEditVisibility(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [editedRange],
 		});
 		return;
@@ -383,6 +434,11 @@ export function recordEditVisibility(
 	if (existing.visibleRanges.length === 0) {
 		existing.mtimeMs = stats.mtimeMs;
 		existing.size = stats.size;
+		if (contentDigest === undefined) {
+			delete existing.contentDigest;
+		} else {
+			existing.contentDigest = contentDigest;
+		}
 		return;
 	}
 
@@ -410,7 +466,24 @@ export function recordEditVisibility(
 
 	existing.mtimeMs = stats.mtimeMs;
 	existing.size = stats.size;
+	if (contentDigest === undefined) {
+		delete existing.contentDigest;
+	} else {
+		existing.contentDigest = contentDigest;
+	}
 	existing.visibleRanges = next;
+}
+
+/** Compare raw current file bytes with the version underlying this scope's visible ranges. */
+export function matchesVisibilityContent(
+	absPath: string,
+	content: string | Buffer,
+): boolean | undefined {
+	const digest = getReadContentScope().visibilityReceipts.get(
+		resolve(absPath),
+	)?.contentDigest;
+	if (digest === undefined) return undefined;
+	return digest === hashFileContent(content);
 }
 
 /**

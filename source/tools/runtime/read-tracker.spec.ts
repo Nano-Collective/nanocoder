@@ -11,6 +11,7 @@ import {
 	invalidateAllVisibilityReceipts,
 	markFileSeen,
 	matchReadContent,
+	matchesVisibilityContent,
 	recordEditVisibility,
 	recordVisibilityReceipt,
 	rememberReadContent,
@@ -188,6 +189,27 @@ test.serial('recordVisibilityReceipt merges multiple ranges', t => {
 
 	const check3 = hasVisibleLines('/tmp/multi.txt', stats, [15]);
 	t.false(check3.visible);
+});
+
+test.serial('visibility receipts bind ranges to the exact observed file content', t => {
+	const stats = {mtimeMs: 100, size: 30};
+	const firstVersion = 'first\nsecond\nthird\n';
+	recordVisibilityReceipt('/tmp/versioned.txt', stats, 1, 1, firstVersion);
+	recordVisibilityReceipt('/tmp/versioned.txt', stats, 2, 4, firstVersion);
+
+	t.true(hasVisibleLines('/tmp/versioned.txt', stats, [1, 2, 3, 4]).visible);
+	t.true(matchesVisibilityContent('/tmp/versioned.txt', firstVersion));
+	t.false(matchesVisibilityContent('/tmp/versioned.txt', 'other\nsecond\nthird\n'));
+});
+
+test.serial('ranges from different same-metadata file versions are not combined', t => {
+	const stats = {mtimeMs: 100, size: 30};
+	recordVisibilityReceipt('/tmp/mixed-versions.txt', stats, 1, 1, 'first\nsecond\n');
+	recordVisibilityReceipt('/tmp/mixed-versions.txt', stats, 2, 2, 'other\nsecond\n');
+
+	t.false(hasVisibleLines('/tmp/mixed-versions.txt', stats, [1, 2]).visible);
+	t.true(hasVisibleLines('/tmp/mixed-versions.txt', stats, [2]).visible);
+	t.true(matchesVisibilityContent('/tmp/mixed-versions.txt', 'other\nsecond\n'));
 });
 
 test.serial('recordVisibilityReceipt replaces receipt on file change', t => {
