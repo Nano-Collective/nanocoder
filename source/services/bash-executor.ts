@@ -18,6 +18,7 @@ import {platform} from 'node:process';
 import {getAppConfig} from '@/config/index';
 import {
 	BASH_BACKGROUND_MAX_RETAINED_JOBS,
+	BASH_JOB_PEEK_OUTPUT_LIMIT,
 	BASH_OUTPUT_PREVIEW_LENGTH,
 	INTERVAL_BASH_PROGRESS_MS,
 	TIMEOUT_BASH_DEFAULT_MS,
@@ -216,6 +217,32 @@ export interface BashJobOutput {
 	error: string | null;
 }
 
+/**
+ * A bounded tail of a job's retained log for TUI inspection. Unlike
+ * `BashJobOutput`, this is not tied to the `bash_output` cursor: text the model
+ * already read is still available, and the status is always current.
+ */
+export interface BashJobRecentOutput extends BashJobOutput {
+	/** True when stdout was longer than the returned tail. */
+	outputTruncated: boolean;
+	/** True when stderr was longer than the returned tail. */
+	stderrTruncated: boolean;
+}
+
+/** One row of `/jobs` — enough to identify a job without a model turn. */
+export interface BashJobInfo {
+	jobId: string;
+	command: string;
+	isComplete: boolean;
+	exitCode: number | null;
+	error: string | null;
+	startedAt: number;
+	/** Set when the job completes, so its runtime stops growing. */
+	endedAt: number | null;
+	/** Milliseconds the job ran; frozen once it completes. */
+	runtimeMs: number;
+}
+
 interface BackgroundJob {
 	state: BashExecutionState;
 	/** Absent when the spawn was refused before a process existed. */
@@ -225,6 +252,10 @@ interface BackgroundJob {
 	readStdout: number;
 	readStderr: number;
 	sessionId?: string;
+	/** Wall-clock start, used for the `/jobs` runtime column. */
+	startedAt: number;
+	/** Set when the job completes so its runtime stops growing. */
+	endedAt?: number;
 }
 
 interface ExecutionEntry {
@@ -388,7 +419,9 @@ export class BashExecutor extends EventEmitter {
 						readStdout: 0,
 						readStderr: 0,
 						sessionId: options?.sessionId,
+						startedAt: Date.now(),
 					});
+					this.markJobFinished(executionId);
 					this.pruneJobs();
 				}
 				this.emit('start', {...state});
@@ -593,6 +626,7 @@ export class BashExecutor extends EventEmitter {
 				this.trackLeftovers(proc, releaseProtected);
 				state.isComplete = true;
 				state.exitCode = code;
+				this.markJobFinished(executionId);
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
 				this.pruneJobs();
@@ -641,6 +675,7 @@ export class BashExecutor extends EventEmitter {
 				this.trackLeftovers(proc, releaseProtected);
 				state.isComplete = true;
 				state.error = error.message;
+				this.markJobFinished(executionId);
 				this.emit('complete', {...state});
 				this.executions.delete(executionId);
 				this.pruneJobs();
@@ -656,6 +691,7 @@ export class BashExecutor extends EventEmitter {
 				readStdout: 0,
 				readStderr: 0,
 				sessionId: options?.sessionId,
+				startedAt: Date.now(),
 			});
 			this.pruneJobs();
 		}
@@ -694,6 +730,7 @@ export class BashExecutor extends EventEmitter {
 			execution.releaseProtected?.();
 			execution.state.isComplete = true;
 			execution.state.error = reason;
+			this.markJobFinished(executionId);
 			this.emit('complete', {...execution.state});
 
 			// Resolve the promise with the cancelled state
@@ -701,6 +738,12 @@ export class BashExecutor extends EventEmitter {
 			this.pruneJobs();
 		});
 		return true;
+	}
+
+	/** Freeze a job's runtime at the moment it completes. */
+	private markJobFinished(executionId: string): void {
+		const job = this.jobs.get(executionId);
+		if (job && job.endedAt === undefined) job.endedAt = Date.now();
 	}
 
 	/**
@@ -725,6 +768,58 @@ export class BashExecutor extends EventEmitter {
 			exitCode: state.exitCode,
 			error: state.error,
 		};
+	}
+
+	/**
+	 * A bounded tail of the job's retained log plus its live status. This is
+	 * independent of `readJobOutput()`'s cursor: startup output already handed
+	 * to the model is still visible in `/jobs <id>`, new output appears as the
+	 * job writes it, and peeking never consumes what the model has not read.
+	 */
+	peekJobOutput(jobId: string): BashJobRecentOutput | undefined {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+		const {state} = job;
+		return {
+			jobId,
+			command: state.command,
+			output: state.fullOutput.slice(-BASH_JOB_PEEK_OUTPUT_LIMIT),
+			stderr: state.stderr.slice(-BASH_JOB_PEEK_OUTPUT_LIMIT),
+			outputTruncated: state.fullOutput.length > BASH_JOB_PEEK_OUTPUT_LIMIT,
+			stderrTruncated: state.stderr.length > BASH_JOB_PEEK_OUTPUT_LIMIT,
+			isComplete: state.isComplete,
+			exitCode: state.exitCode,
+			error: state.error,
+		};
+	}
+
+	/** Snapshot of every retained background job, running ones first. */
+	listJobs(): BashJobInfo[] {
+		return [...this.jobs.entries()]
+			.map(([jobId, job]) => ({
+				jobId,
+				command: job.state.command,
+				isComplete: job.state.isComplete,
+				exitCode: job.state.exitCode,
+				error: job.state.error,
+				startedAt: job.startedAt,
+				endedAt: job.endedAt ?? null,
+				runtimeMs: (job.endedAt ?? Date.now()) - job.startedAt,
+			}))
+			.sort(
+				(a, b) =>
+					Number(a.isComplete) - Number(b.isComplete) ||
+					a.startedAt - b.startedAt,
+			);
+	}
+
+	/** How many background jobs are still running (for the status bar). */
+	getRunningJobCount(): number {
+		let count = 0;
+		for (const job of this.jobs.values()) {
+			if (!job.state.isComplete) count++;
+		}
+		return count;
 	}
 
 	/**
