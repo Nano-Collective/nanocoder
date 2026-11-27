@@ -24,6 +24,54 @@ test('parseToolCalls: successfully parses valid XML tool call', t => {
 	}
 });
 
+test('parseToolCalls: finds XML tool calls after a fenced code example', t => {
+	const content = `Here is the relevant code:
+
+\`\`\`javascript
+const x = 1;
+\`\`\`
+
+<read_file><path>src/app.ts</path></read_file>`;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'src/app.ts',
+		});
+		t.regex(result.cleanedContent, /Here is the relevant code:/);
+		t.regex(result.cleanedContent, /const x = 1;/);
+		t.notRegex(result.cleanedContent, /<read_file>/);
+	}
+});
+
+test('parseToolCalls: finds XML tool calls before a fenced code example', t => {
+	const content = `<read_file><path>src/app.ts</path></read_file>
+
+Here is the relevant code:
+
+\`\`\`javascript
+const x = 1;
+\`\`\``;
+
+	const result = parseToolCalls(content);
+
+	t.true(result.success);
+	if (result.success) {
+		t.is(result.toolCalls.length, 1);
+		t.is(result.toolCalls[0].function.name, 'read_file');
+		t.deepEqual(result.toolCalls[0].function.arguments, {
+			path: 'src/app.ts',
+		});
+		t.regex(result.cleanedContent, /Here is the relevant code:/);
+		t.regex(result.cleanedContent, /const x = 1;/);
+		t.notRegex(result.cleanedContent, /<read_file>/);
+	}
+});
+
 test('parseToolCalls: preserves markup beside an XML tool call', t => {
 	const prose = 'Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop.';
 	const result = parseToolCalls(
