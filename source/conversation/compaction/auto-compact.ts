@@ -22,7 +22,7 @@ import {
 	resetAutoCompactSession as resetAutoCompactSessionOverrides,
 } from './auto-compact-session';
 import {compressionBackup} from './compression-backup';
-import {summariseWithLLM} from './llm-summariser';
+import {type SummariseSkipReason, summariseWithLLM} from './llm-summariser';
 import {COMPRESSION_CONSTANTS, compressMessages} from './message-compression';
 
 export {
@@ -32,6 +32,12 @@ export {
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
 } from './auto-compact-session';
+
+const LLM_SKIP_NOTICES: Record<SummariseSkipReason, string> = {
+	failed: ' (summary degraded: LLM call failed)',
+	'not-smaller': ' (LLM summary was not smaller, used mechanical compaction)',
+	'nothing-to-compress': ' (nothing to summarise)',
+};
 
 // Tune's "Aggressive Compact" preset. It sits between the config file and the
 // user's explicit `/compact` session overrides, so turning tune on or off never
@@ -205,17 +211,16 @@ export async function performAutoCompact(
 		// a single synthetic message. Falls back to mechanical on any failure
 		// (network error, malformed response, etc.) so a transient model issue
 		// never blocks compaction.
-		let llmFallback = false;
+		let llmSkipReason: SummariseSkipReason | null = null;
 		if (strategy === 'llm' && client) {
 			if (signal?.aborted) {
 				return null;
 			}
-			llmFallback = true;
 			if (config.notifyUser && onNotify) {
 				onNotify('auto-compacting context...');
 			}
 			try {
-				const llmCompressed = await summariseWithLLM({
+				const summary = await summariseWithLLM({
 					messages,
 					systemMessage,
 					client,
@@ -227,8 +232,8 @@ export async function performAutoCompact(
 					return null;
 				}
 
+				const llmCompressed = summary.messages;
 				if (llmCompressed) {
-					llmFallback = false;
 					// Tool definitions are constant across compaction, so include them on
 					// both sides — otherwise the reduction % is inflated by tokens that
 					// never get removed.
@@ -253,10 +258,12 @@ export async function performAutoCompact(
 					invalidateAllVisibilityReceipts();
 					return llmCompressed;
 				}
+				llmSkipReason = summary.reason;
 			} catch (_error) {
 				if (signal?.aborted) {
 					return null;
 				}
+				llmSkipReason = 'failed';
 				// fall through to mechanical
 			}
 		}
@@ -279,8 +286,8 @@ export async function performAutoCompact(
 		// Show notification if enabled
 		if (config.notifyUser && onNotify) {
 			const reduction = Math.round(result.reductionPercentage);
-			const fallbackNotice = llmFallback
-				? ' (summary degraded: LLM call failed)'
+			const fallbackNotice = llmSkipReason
+				? LLM_SKIP_NOTICES[llmSkipReason]
 				: '';
 			onNotify(
 				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting${fallbackNotice}...\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,

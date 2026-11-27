@@ -13,6 +13,16 @@ export interface SummariseWithLLMParams {
 	signal?: AbortSignal;
 }
 
+/** Why no summary was produced, so callers can tell the user what happened. */
+export type SummariseSkipReason =
+	| 'failed'
+	| 'not-smaller'
+	| 'nothing-to-compress';
+
+export type SummariseResult =
+	| {messages: Message[]; reason?: undefined}
+	| {messages: null; reason: SummariseSkipReason};
+
 const SUMMARISER_SYSTEM_PROMPT = `You compact coding-agent conversations without losing information that future turns will need.
 
 Output a single markdown summary of the segment below. Use exactly these sections, omit any that are empty:
@@ -48,12 +58,13 @@ Rules:
  * message is intentionally not included in the return value — the chat
  * handler re-injects it on each call.
  *
- * Returns null when there is nothing meaningful to summarise (segment empty
- * or model returned an empty response).
+ * Returns `messages: null` with a reason when no summary is used: `failed`
+ * when the call threw or returned no content, `not-smaller` when the summary
+ * would not save space, and `nothing-to-compress` when the segment is empty.
  */
 export async function summariseWithLLM(
 	params: SummariseWithLLMParams,
-): Promise<Message[] | null> {
+): Promise<SummariseResult> {
 	const {
 		messages,
 		systemMessage,
@@ -95,7 +106,7 @@ export async function summariseWithLLM(
 	}
 
 	if (compressible.length === 0) {
-		return null;
+		return {messages: null, reason: 'nothing-to-compress'};
 	}
 
 	const transcript = serialiseTranscript(compressible);
@@ -112,12 +123,12 @@ export async function summariseWithLLM(
 	try {
 		response = await client.chat(summariserMessages, {}, {}, signal);
 	} catch {
-		return null;
+		return {messages: null, reason: 'failed'};
 	}
 
 	const summaryContent = response?.choices?.[0]?.message?.content?.trim();
 	if (!summaryContent) {
-		return null;
+		return {messages: null, reason: 'failed'};
 	}
 
 	const summaryMessage: Message = {
@@ -126,7 +137,7 @@ export async function summariseWithLLM(
 	};
 
 	// Recompute token count to verify we actually saved space; if the
-	// summary is somehow larger than the original, return null so the
+	// summary is somehow larger than the original, return no messages so the
 	// caller falls back to mechanical.
 	const originalTokens = compressible.reduce(
 		(sum, msg) => sum + tokenizer.countTokens(msg),
@@ -134,10 +145,10 @@ export async function summariseWithLLM(
 	);
 	const summaryTokens = tokenizer.countTokens(summaryMessage);
 	if (summaryTokens >= originalTokens) {
-		return null;
+		return {messages: null, reason: 'not-smaller'};
 	}
 
-	return [summaryMessage, ...recent];
+	return {messages: [summaryMessage, ...recent]};
 }
 
 function serialiseTranscript(messages: Message[]): string {

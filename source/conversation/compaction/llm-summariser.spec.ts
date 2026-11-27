@@ -111,7 +111,7 @@ test('summariseWithLLM returns [summary, ...recent] when segment is non-empty', 
 		{role: 'assistant', content: 'most recent assistant'},
 	];
 
-	const result = await summariseWithLLM({
+	const {messages: result} = await summariseWithLLM({
 		messages,
 		systemMessage,
 		client,
@@ -128,7 +128,7 @@ test('summariseWithLLM returns [summary, ...recent] when segment is non-empty', 
 	t.is(client.calls.length, 1);
 });
 
-test('summariseWithLLM returns null when nothing to compress', async t => {
+test('summariseWithLLM reports nothing-to-compress when the segment is empty', async t => {
 	const tokenizer = makeTokenizer();
 	const client = makeClient(() => 'should not be called');
 
@@ -144,11 +144,11 @@ test('summariseWithLLM returns null when nothing to compress', async t => {
 		tokenizer,
 	});
 
-	t.is(result, null);
+	t.deepEqual(result, {messages: null, reason: 'nothing-to-compress'});
 	t.is(client.calls.length, 0, 'no LLM call when segment is empty');
 });
 
-test('summariseWithLLM returns null when LLM throws (so caller falls back)', async t => {
+test('summariseWithLLM reports failed when the LLM throws (so caller falls back)', async t => {
 	const tokenizer = makeTokenizer();
 	const client = makeClient(() => {
 		throw new Error('network down');
@@ -170,10 +170,10 @@ test('summariseWithLLM returns null when LLM throws (so caller falls back)', asy
 		tokenizer,
 	});
 
-	t.is(result, null);
+	t.deepEqual(result, {messages: null, reason: 'failed'});
 });
 
-test('summariseWithLLM returns null when summary is empty', async t => {
+test('summariseWithLLM reports failed when the summary is empty', async t => {
 	const tokenizer = makeTokenizer();
 	const client = makeClient(() => '   ');
 
@@ -191,10 +191,10 @@ test('summariseWithLLM returns null when summary is empty', async t => {
 		tokenizer,
 	});
 
-	t.is(result, null);
+	t.deepEqual(result, {messages: null, reason: 'failed'});
 });
 
-test('summariseWithLLM returns null when summary is not smaller than original', async t => {
+test('summariseWithLLM reports not-smaller when the summary does not save space', async t => {
 	const tokenizer = makeTokenizer();
 	// Force the LLM to "summarise" by emitting more text than the original
 	const client = makeClient(() => 'x'.repeat(20_000));
@@ -213,7 +213,7 @@ test('summariseWithLLM returns null when summary is not smaller than original', 
 		tokenizer,
 	});
 
-	t.is(result, null, 'caller falls back to mechanical when LLM is unhelpful');
+	t.deepEqual(result, {messages: null, reason: 'not-smaller'});
 });
 
 test('summariseWithLLM passes a transcript that preserves tool calls and names', async t => {
@@ -281,7 +281,7 @@ test('summariseWithLLM never starts the recent tail with an orphaned tool result
 		{role: 'tool', name: 'read', tool_call_id: 'call_B', content: 'contents'},
 	];
 
-	const result = await summariseWithLLM({
+	const {messages: result} = await summariseWithLLM({
 		messages,
 		systemMessage,
 		client,
@@ -329,7 +329,7 @@ test('summariseWithLLM never summarises a display-only notice', async t => {
 		{role: 'assistant', content: 'rerunning'},
 	];
 
-	const result = await summariseWithLLM({
+	const {messages: result} = await summariseWithLLM({
 		messages,
 		systemMessage,
 		client,
@@ -360,7 +360,7 @@ test('summariseWithLLM keeps a display-only notice that falls in the recent tail
 		},
 	];
 
-	const result = await summariseWithLLM({
+	const {messages: result} = await summariseWithLLM({
 		messages,
 		systemMessage,
 		client,
