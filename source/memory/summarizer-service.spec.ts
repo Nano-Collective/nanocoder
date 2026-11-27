@@ -26,7 +26,7 @@ test('SummarizerService stores a manual memory', async t => {
 	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
 	const service = new SummarizerService(manager, () => true);
 
-	const memory = await service.remember({
+	const {memory} = await service.remember({
 		content: '  Use the existing provider abstraction for model changes.  ',
 		sourceSessionId: 'session-1',
 	});
@@ -60,12 +60,52 @@ test('SummarizerService uses explicit camelCase category', async t => {
 		() => true,
 	);
 
-	const memory = await service.remember({
+	const {memory} = await service.remember({
 		content: 'Keep generated files out of review unless needed.',
 		category: 'coding style',
 	});
 
 	t.is(memory.category, 'codingStyle');
+});
+
+test('SummarizerService applies an explicit category when refreshing an existing memory', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+	const content = 'Use the existing provider abstraction for model changes.';
+
+	const {memory: first} = await service.remember({content});
+	const result = await service.remember({
+		content: `  ${content}  `,
+		category: 'todo',
+	});
+
+	t.false(result.created);
+	t.true(result.updated);
+	t.is(result.memory.id, first.id);
+	t.is(result.memory.category, 'todo');
+});
+
+test('SummarizerService does not replace an explicit category with an inferred one', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+	const content = 'Keep generated files out of review.';
+
+	const {memory: first} = await service.remember({
+		content,
+		category: 'todo',
+	});
+	const {memory: refreshed} = await service.remember({
+		content: `  ${content}  `,
+	});
+
+	t.is(refreshed.id, first.id);
+	t.is(refreshed.category, 'todo');
 });
 
 test('inferMemoryCategory maps durable facts to stable categories', t => {
@@ -380,7 +420,7 @@ test('SummarizerService acceptProposal saves a proposal without re-deriving its 
 	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
 	const service = new SummarizerService(manager, () => true);
 
-	const memory = await service.acceptProposal(
+	const {memory} = await service.acceptProposal(
 		{content: 'Fixed the queued input regression by restoring drafts.', category: 'bugFix'},
 		'session-1',
 	);
@@ -422,11 +462,12 @@ test('SummarizerService does not save an accepted proposal twice', async t => {
 		category: 'bugFix',
 	};
 
-	const first = await service.acceptProposal(proposal);
-	const second = await service.acceptProposal(proposal);
+	const {memory: first} = await service.acceptProposal(proposal);
+	const {memory: second} = await service.acceptProposal(proposal);
 
 	t.is(second.id, first.id);
-	t.deepEqual(await manager.listMemories(), [first]);
+	t.true(second.timestamp >= first.timestamp);
+	t.deepEqual(await manager.listMemories(), [second]);
 });
 
 // --- Reversal detector: the four variants the round-3 review found defeated,

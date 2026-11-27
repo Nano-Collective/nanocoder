@@ -39,7 +39,19 @@ export interface MemoryFileChange {
 export interface CreateMemoryInput {
 	content: string;
 	category?: string;
+	/**
+	 * Whether `category` was chosen by the caller rather than inferred. Only an
+	 * explicit category is allowed to replace the category of an existing memory.
+	 */
+	explicitCategory?: boolean;
 	sourceSessionId?: string;
+}
+
+/** Outcome of a save, so callers can report "already saved" honestly. */
+export interface SaveMemoryResult {
+	memory: SemanticMemory;
+	created: boolean;
+	updated: boolean;
 }
 
 export interface SemanticMemoryManagerOptions {
@@ -134,9 +146,25 @@ function hashScope(scope: string): string {
 	return crypto.createHash('sha256').update(scope).digest('hex').slice(0, 32);
 }
 
-/** Case and whitespace differences do not make a memory a new memory. */
+/**
+ * Whitespace differences do not make a memory a new memory. Case is preserved:
+ * `api_key` and `API_KEY` can be different identifiers, not a correction.
+ */
 function normalizeMemoryContent(content: string): string {
-	return content.replaceAll(/\s+/gu, ' ').trim().toLowerCase();
+	return content.replaceAll(/\s+/gu, ' ').trim();
+}
+
+/** The comparison shared by saves, duplicate refreshes and proposal filtering. */
+function isSameMemoryContent(left: string, right: string): boolean {
+	return normalizeMemoryContent(left) === normalizeMemoryContent(right);
+}
+
+/** Returns a stored memory that should be refreshed instead of duplicated. */
+export function findMatchingMemory(
+	memories: readonly SemanticMemory[],
+	content: string,
+): SemanticMemory | undefined {
+	return memories.find(memory => isSameMemoryContent(memory.content, content));
 }
 
 const STOPWORDS = new Set([
@@ -320,6 +348,16 @@ export class SemanticMemoryManager {
 	}
 
 	async addMemory(input: CreateMemoryInput): Promise<SemanticMemory> {
+		return (await this.saveMemory(input)).memory;
+	}
+
+	/**
+	 * Saves a memory or refreshes an equivalent one. A refresh keeps the id and
+	 * original wording, but takes the current git snapshot and timestamp so a
+	 * re-save can clear a stale-file warning and an explicit category can be
+	 * applied. Inferred/default categories never replace one already stored.
+	 */
+	async saveMemory(input: CreateMemoryInput): Promise<SaveMemoryResult> {
 		const content = input.content.trim();
 		if (!content) {
 			throw new Error('Memory content cannot be empty');
@@ -327,30 +365,36 @@ export class SemanticMemoryManager {
 
 		const category = input.category?.trim() || 'project';
 		const git = await this.captureGitSnapshot(content);
-		const memory: SemanticMemory = {
-			id: crypto.randomUUID(),
-			content,
-			category,
-			timestamp: new Date().toISOString(),
-			...(input.sourceSessionId
-				? {sourceSessionId: input.sourceSessionId}
-				: {}),
-			...(git ? {git} : {}),
-		};
+		const timestamp = new Date().toISOString();
 
 		return this.mutate(async () => {
 			const memories = await this.listMemories();
-			// Recalled memories can come back as proposals; saving one again
-			// would make it surface twice on every later turn.
-			const contentKey = normalizeMemoryContent(content);
-			const existing = memories.find(
-				memory => normalizeMemoryContent(memory.content) === contentKey,
-			);
-			if (existing) return existing;
+			const existing = findMatchingMemory(memories, content);
+			if (!existing) {
+				const memory: SemanticMemory = {
+					id: crypto.randomUUID(),
+					content,
+					category,
+					timestamp,
+					...(input.sourceSessionId
+						? {sourceSessionId: input.sourceSessionId}
+						: {}),
+					...(git ? {git} : {}),
+				};
+				memories.push(memory);
+				await this.writeMemories(memories);
+				return {memory, created: true, updated: false};
+			}
 
-			memories.push(memory);
+			const updated: SemanticMemory = {
+				...existing,
+				category: input.explicitCategory ? category : existing.category,
+				timestamp,
+				...(git ? {git} : {}),
+			};
+			memories[memories.indexOf(existing)] = updated;
 			await this.writeMemories(memories);
-			return memory;
+			return {memory: updated, created: false, updated: true};
 		});
 	}
 

@@ -2,7 +2,7 @@ import {getSemanticMemoryEnabled} from '@/config/preferences';
 import type {Message} from '@/types/core';
 import {stripTurnContext} from '@/utils/turn-context';
 import {
-	type SemanticMemory,
+	type SaveMemoryResult,
 	SemanticMemoryManager,
 } from './semantic-memory-manager';
 
@@ -267,12 +267,12 @@ export class SummarizerService {
 	constructor(
 		private readonly memoryManager: Pick<
 			SemanticMemoryManager,
-			'addMemory'
+			'saveMemory'
 		> = new SemanticMemoryManager(),
 		private readonly isMemoryEnabled: () => boolean = getSemanticMemoryEnabled,
 	) {}
 
-	async remember(input: RememberMemoryInput): Promise<SemanticMemory> {
+	async remember(input: RememberMemoryInput): Promise<SaveMemoryResult> {
 		this.assertMemoryWritesEnabled();
 
 		const content = input.content.trim();
@@ -280,11 +280,14 @@ export class SummarizerService {
 			throw new Error('Memory content cannot be empty');
 		}
 
-		return this.memoryManager.addMemory({
+		return this.memoryManager.saveMemory({
 			content,
 			category: input.category
 				? toCamelCaseCategory(input.category)
 				: inferMemoryCategory(content),
+			// An inferred category is fine for a new memory, but must not replace
+			// a category the user explicitly set on an existing one.
+			explicitCategory: input.category !== undefined,
 			sourceSessionId: input.sourceSessionId,
 		});
 	}
@@ -292,12 +295,14 @@ export class SummarizerService {
 	async acceptProposal(
 		proposal: Pick<MemoryProposal, 'content' | 'category'>,
 		sourceSessionId?: string,
-	): Promise<SemanticMemory> {
+	): Promise<SaveMemoryResult> {
 		this.assertMemoryWritesEnabled();
 
-		return this.memoryManager.addMemory({
+		return this.memoryManager.saveMemory({
 			content: proposal.content,
 			category: proposal.category,
+			// Proposal categories are inferred from conversation text, so they
+			// seed new memories without overwriting an explicit stored category.
 			sourceSessionId,
 		});
 	}

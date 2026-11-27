@@ -1,12 +1,17 @@
 import test from 'ava';
 import React from 'react';
 import {ProposalStore} from '@/memory/proposal-store';
-import type {SemanticMemory} from '@/memory/semantic-memory-manager';
+import type {
+	SaveMemoryResult,
+	SemanticMemory,
+} from '@/memory/semantic-memory-manager';
 import type {MemoryProposal} from '@/memory/summarizer-service';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
 import {lazyCommands} from './lazy-registry.js';
 import {createMemoryCommand, memoryCommand} from './memory.js';
+
+const EXISTING_MEMORY_ID = '18d51c0d-becb-4efc-8d0d-b8c1f3b61802';
 
 const testMetadata = {
 	provider: 'test-provider',
@@ -34,20 +39,28 @@ class FakeMemoryManager {
 		this.memories = [];
 	}
 
-	async addMemory(input: {
+	async saveMemory(input: {
 		content: string;
-		category: string;
+		category?: string;
+		explicitCategory?: boolean;
 		sourceSessionId?: string;
-	}): Promise<SemanticMemory> {
+	}): Promise<SaveMemoryResult> {
+		const existing = this.memories.find(
+			memory => memory.content === input.content,
+		);
+		if (existing) {
+			return {memory: existing, created: false, updated: true};
+		}
+
 		const memory: SemanticMemory = {
 			id: `memory-${this.memories.length + 1}`,
 			content: input.content,
-			category: input.category,
+			category: input.category?.trim() || 'project',
 			timestamp: '2026-08-05T00:00:00.000Z',
 			sourceSessionId: input.sourceSessionId,
 		};
 		this.memories.push(memory);
-		return memory;
+		return {memory, created: true, updated: false};
 	}
 }
 
@@ -55,7 +68,10 @@ class FakeSummarizerService {
 	accepted: Array<Pick<MemoryProposal, 'content' | 'category'>> = [];
 	sessionIds: Array<string | undefined> = [];
 
-	constructor(private readonly proposals: MemoryProposal[]) {}
+	constructor(
+		private readonly proposals: MemoryProposal[],
+		private readonly alreadySaved = false,
+	) {}
 
 	proposeMemoriesFromMessages(messages: Message[]): MemoryProposal[] {
 		return messages.length === 0 ? [] : this.proposals;
@@ -64,26 +80,36 @@ class FakeSummarizerService {
 	async remember(input: {
 		content: string;
 		category?: string;
-	}): Promise<SemanticMemory> {
+	}): Promise<SaveMemoryResult> {
 		return {
-			id: 'remembered',
-			content: input.content,
-			category: input.category ?? 'project',
-			timestamp: '2026-08-05T00:00:00.000Z',
+			memory: {
+				id: this.alreadySaved ? EXISTING_MEMORY_ID : 'remembered',
+				content: input.content,
+				category: input.category ?? 'project',
+				timestamp: '2026-08-05T00:00:00.000Z',
+			},
+			created: !this.alreadySaved,
+			updated: this.alreadySaved,
 		};
 	}
 
 	async acceptProposal(
 		proposal: Pick<MemoryProposal, 'content' | 'category'>,
 		sourceSessionId?: string,
-	): Promise<SemanticMemory> {
+	): Promise<SaveMemoryResult> {
 		this.accepted.push({content: proposal.content, category: proposal.category});
 		this.sessionIds.push(sourceSessionId);
 		return {
-			id: `accepted-${this.accepted.length}`,
-			content: proposal.content,
-			category: proposal.category,
-			timestamp: '2026-08-05T00:00:00.000Z',
+			memory: {
+				id: this.alreadySaved
+					? EXISTING_MEMORY_ID
+					: `accepted-${this.accepted.length}`,
+				content: proposal.content,
+				category: proposal.category,
+				timestamp: '2026-08-05T00:00:00.000Z',
+			},
+			created: !this.alreadySaved,
+			updated: this.alreadySaved,
 		};
 	}
 }
@@ -231,6 +257,44 @@ test('memory command reports when no proposals are found', async t => {
 	t.true((lastFrame() ?? '').includes('No durable memory proposals found.'));
 });
 
+test('memory command skips proposals whose content is already saved', async t => {
+	const savedProposal = proposal('Auth uses Clerk.');
+
+	for (const savedContent of ['Auth uses Clerk.', 'Auth  uses Clerk.']) {
+		const manager = new FakeMemoryManager();
+		manager.memories = [storedMemory(EXISTING_MEMORY_ID, savedContent)];
+		const command = createMemoryCommand({
+			memoryManager: manager,
+			summarizerService: new FakeSummarizerService([savedProposal]),
+		});
+
+		const result = await command.handler(
+			['propose'],
+			[{role: 'user', content: 'Refactor auth.'}],
+			testMetadata,
+		);
+		const output = renderWithTheme(result as React.ReactElement).lastFrame() ?? '';
+
+		t.true(output.includes('No durable memory proposals found.'));
+	}
+
+	// Case changes are real corrections, not duplicates.
+	const manager = new FakeMemoryManager();
+	manager.memories = [storedMemory(EXISTING_MEMORY_ID, 'auth uses clerk.')];
+	const command = createMemoryCommand({
+		memoryManager: manager,
+		summarizerService: new FakeSummarizerService([savedProposal]),
+	});
+	const result = await command.handler(
+		['propose'],
+		[{role: 'user', content: 'Refactor auth.'}],
+		testMetadata,
+	);
+	const output = renderWithTheme(result as React.ReactElement).lastFrame() ?? '';
+
+	t.true(output.includes('Auth uses Clerk.'));
+});
+
 test('memory command accepts a proposal by index after propose', async t => {
 	const manager = new FakeMemoryManager();
 	const summarizerService = new FakeSummarizerService([
@@ -253,6 +317,29 @@ test('memory command accepts a proposal by index after propose', async t => {
 		{content: 'Auth uses Clerk.', category: 'architecture'},
 	]);
 	t.deepEqual(summarizerService.sessionIds, [undefined]);
+});
+
+test('memory command reports an already saved proposal instead of a new save', async t => {
+	const summarizerService = new FakeSummarizerService(
+		[proposal('Auth uses Clerk.')],
+		true,
+	);
+	const command = createMemoryCommand({
+		memoryManager: new FakeMemoryManager(),
+		summarizerService,
+	});
+
+	await command.handler(
+		['propose'],
+		[{role: 'user', content: 'Refactor auth.'}],
+		testMetadata,
+	);
+	const result = await command.handler(['accept', '1'], [], testMetadata);
+	const output = renderWithTheme(result as React.ReactElement).lastFrame() ?? '';
+
+	t.false(output.includes('Saved architecture memory: Auth uses Clerk.'));
+	t.true(output.includes('Already saved as memory 18d51c0d'));
+	t.true(output.includes('updated'));
 });
 
 test('memory command passes the current session id when accepting a proposal', async t => {
