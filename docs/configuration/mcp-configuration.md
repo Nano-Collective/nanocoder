@@ -311,7 +311,7 @@ Use environment variable references to keep credentials out of config files:
 }
 ```
 
-Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`. Variable names must be uppercase (letters, digits and underscores); a lowercase reference such as `$token` is left as literal text.
+Supported syntax: `$VAR`, `${VAR}`, `${VAR:-default}`. As in the shell, `${VAR:-default}` uses the default when `VAR` is unset or set to an empty value. Variable names must be uppercase (letters, digits and underscores); a lowercase reference such as `$token` is left as literal text.
 
 > **Security:** Project-level `.mcp.json` files are typically version controlled. Always use environment variable references for sensitive values.
 
@@ -336,6 +336,6 @@ Run `/settings mcp` for interactive configuration with:
 
 **General:**
 - _Transport type mismatch_ — Ensure `transport` matches your server (`stdio` for local commands, `http`/`websocket` for remote URLs).
-- _Environment variables_ - Ensure all `$VAR` references resolve. Unset variables resolve to empty strings (with an error in the log), and lowercase names are not substituted at all.
+- _Environment variables_ - Ensure all `$VAR` references resolve. Unset variables without a default resolve to empty strings (with an error in the log), a `${VAR:-default}` reference uses its default when `VAR` is unset or empty, and lowercase names are not substituted at all.
 
 For more servers and community configurations, see the [MCP servers repository](https://github.com/modelcontextprotocol/servers).

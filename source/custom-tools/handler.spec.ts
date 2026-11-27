@@ -10,11 +10,13 @@ import {
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import test, {type ExecutionContext} from 'ava';
+import {buildToolEntry} from '@/custom-tools/build-tool';
 import {
 	applyParameterDefaults,
 	buildHandler,
 	expandVars,
 	mergeEnv,
+	pickShell,
 	resolveCwd,
 	runScript,
 } from './handler';
@@ -98,6 +100,14 @@ test('expandVars replaces $VAR and ${VAR}', t => {
 	t.is(expandVars('${NCT_MISSING}'), '');
 	if (prev === undefined) delete process.env.NCT_FOO;
 	else process.env.NCT_FOO = prev;
+});
+
+test('expandVars uses the default when the var is set but empty', t => {
+	process.env.NCT_EMPTY = '';
+	t.is(expandVars('${NCT_EMPTY:-fallback}'), 'fallback');
+	t.is(expandVars('[${NCT_EMPTY}]'), '[]');
+	t.is(expandVars('[$NCT_EMPTY]'), '[]');
+	delete process.env.NCT_EMPTY;
 });
 
 // Prove runScript forwards shellArgs, not a hardcoded -c. A POSIX script
@@ -616,4 +626,102 @@ shellCase('buildHandler honors env merging', async t => {
 	);
 	const result = await handler({});
 	t.is(result, 'EXIT_CODE: 0\nhello-env');
+});
+
+// Cancellation. The scripts below are spelled for the platform's default
+// shell, so the settle assertions run on every OS; the "child is gone" check
+// needs the shell's own pid and only runs where the script can report it.
+// The sleeping shells run in the system temp directory, not testDir: on
+// Windows the forced kill is asynchronous, and a process whose cwd is testDir
+// would make the after.always cleanup fail with EPERM.
+const sleepScript = (seconds: number) =>
+	process.platform === 'win32'
+		? `ping -n ${seconds + 1} 127.0.0.1 > nul`
+		: `sleep ${seconds}`;
+
+test('runScript: an abort during the run stops the script and settles at once', async t => {
+	const pidFile = join(testDir, `abort-${Date.now()}.pid`).replaceAll(
+		'\\',
+		'/',
+	);
+	const script =
+		process.platform === 'win32'
+			? sleepScript(30)
+			: `echo $$ > '${pidFile}'; ${sleepScript(30)}`;
+	const controller = new AbortController();
+	const started = Date.now();
+	const run = runScript(script, {
+		cwd: tmpdir(),
+		env: process.env,
+		shell: pickShell(undefined),
+		timeoutMs: 60_000,
+		abortSignal: controller.signal,
+	});
+	setTimeout(() => controller.abort(), 300);
+
+	await t.throwsAsync(run, {message: /cancelled/});
+	t.true(
+		Date.now() - started < 5_000,
+		'a cancelled call must not wait for the script to finish',
+	);
+
+	if (process.platform === 'win32') return;
+	// Give the OS a moment to reap the group (mirrors the timeout case).
+	await new Promise(resolve => setTimeout(resolve, 300));
+	const raw = existsSync(pidFile) ? readFileSync(pidFile, 'utf8') : '';
+	const match = raw.match(/\d+/);
+	t.truthy(match, 'the script must have started and written its pid');
+	if (match) {
+		t.throws(
+			() => process.kill(Number(match[0]), 0),
+			undefined,
+			'the shell must be gone after the abort',
+		);
+	}
+});
+
+test('runScript: an already aborted signal rejects without spawning', async t => {
+	const marker = join(testDir, `never-${Date.now()}.txt`).replaceAll(
+		'\\',
+		'/',
+	);
+	const script =
+		process.platform === 'win32'
+			? `echo ran > "${marker}"`
+			: `echo ran > '${marker}'`;
+	const controller = new AbortController();
+	controller.abort();
+
+	await t.throwsAsync(
+		runScript(script, {
+			cwd: tmpdir(),
+			env: process.env,
+			shell: pickShell(undefined),
+			timeoutMs: 5_000,
+			abortSignal: controller.signal,
+		}),
+		{message: /cancelled/},
+	);
+	// A spawned shell would have written the marker within this window.
+	await new Promise(resolve => setTimeout(resolve, 500));
+	t.false(existsSync(marker), 'the script must never have run');
+});
+
+test('a built tool entry forwards the call options to the script', async t => {
+	const entry = buildToolEntry(
+		{
+			metadata: meta({shell: undefined, timeoutMs: 60_000}),
+			body: sleepScript(30),
+			filePath: join(testDir, 't.md'),
+			source: 'project',
+		},
+		tmpdir(),
+	);
+	const controller = new AbortController();
+	const started = Date.now();
+	const run = entry.handler({}, {abortSignal: controller.signal});
+	setTimeout(() => controller.abort(), 300);
+
+	await t.throwsAsync(run, {message: /cancelled/});
+	t.true(Date.now() - started < 5_000);
 });

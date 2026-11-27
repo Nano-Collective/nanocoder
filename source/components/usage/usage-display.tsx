@@ -45,7 +45,13 @@ export function UsageDisplay({
 	// Calculate percentages
 	const percentUsed = contextLimit ? (currentTokens / contextLimit) * 100 : 0;
 	const statusColor = getUsageStatusColor(percentUsed);
-	const availableTokens = contextLimit ? contextLimit - currentTokens : 0;
+	const availableTokens = contextLimit ? contextLimit - currentTokens : null;
+	const availableLabel =
+		availableTokens === null
+			? 'unknown (set one with /context-max)'
+			: availableTokens < 0
+				? `0 tokens (over by ${formatTokenCount(Math.abs(availableTokens))})`
+				: `${formatTokenCount(availableTokens)} tokens`;
 
 	// Get the actual color from theme
 	const progressColor =
@@ -54,6 +60,12 @@ export function UsageDisplay({
 			: statusColor === 'warning'
 				? colors.warning
 				: colors.error;
+	const availableColor =
+		availableTokens === null
+			? colors.secondary
+			: availableTokens <= 0
+				? colors.error
+				: progressColor;
 
 	// Calculate category percentages for breakdown bars
 	const systemPercent = currentTokens
@@ -106,23 +118,33 @@ export function UsageDisplay({
 					Overall Usage
 				</Text>
 			</Box>
-			<Box marginBottom={0}>
-				<ProgressBar
-					percent={percentUsed}
-					width={mainProgressWidth}
-					color={progressColor}
-				/>
-				<Text color={colors.text} bold>
-					{' '}
-					{Math.round(percentUsed)}%
-				</Text>
-			</Box>
-			<Box marginBottom={1}>
-				<Text color={colors.secondary}>
-					{formatTokenCount(currentTokens)} /{' '}
-					{contextLimit ? formatTokenCount(contextLimit) : 'Unknown'} tokens
-				</Text>
-			</Box>
+			{contextLimit ? (
+				<>
+					<Box marginBottom={0}>
+						<ProgressBar
+							percent={percentUsed}
+							width={mainProgressWidth}
+							color={progressColor}
+						/>
+						<Text color={colors.text} bold>
+							{' '}
+							{Math.round(percentUsed)}%
+						</Text>
+					</Box>
+					<Box marginBottom={1}>
+						<Text color={colors.secondary}>
+							{formatTokenCount(currentTokens)} /{' '}
+							{formatTokenCount(contextLimit)} tokens
+						</Text>
+					</Box>
+				</>
+			) : (
+				<Box marginBottom={1}>
+					<Text color={colors.secondary}>
+						{formatTokenCount(currentTokens)} / Unknown tokens
+					</Text>
+				</Box>
+			)}
 
 			{/* Category Breakdown */}
 			<Box marginTop={1} marginBottom={1}>
@@ -234,10 +256,7 @@ export function UsageDisplay({
 			{/* Available Tokens */}
 			<Box marginTop={1} marginBottom={1}>
 				<Text color={colors.secondary}>
-					Available:{' '}
-					<Text color={colors.success}>
-						{formatTokenCount(availableTokens)} tokens
-					</Text>
+					Available: <Text color={availableColor}>{availableLabel}</Text>
 				</Text>
 			</Box>
 

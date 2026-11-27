@@ -100,9 +100,6 @@ importers:
       ink-gradient:
         specifier: ^4.0.1
         version: 4.0.1(ink@8.0.0(@types/react@19.3.0)(react@19.3.1))(react@19.3.1)
-      ink-select-input:
-        specifier: ^6.2.0
-        version: 6.2.0(ink@8.0.0(@types/react@19.3.0)(react@19.3.1))(react@19.3.1)
       ink-spinner:
         specifier: ^5.0.0
         version: 5.0.0(ink@8.0.0(@types/react@19.3.0)(react@19.3.1))(react@19.3.1)
@@ -2935,13 +2932,6 @@ packages:
       ink: '>=6'
       react: '>=19.2.0'
 
-  ink-select-input@6.2.0:
-    resolution: {integrity: sha512-304fZXxkpYxJ9si5lxRCaX01GNlmPBgOZumXXRnPYbHW/iI31cgQynqk2tRypGLOF1cMIwPUzL2LSm6q4I5rQQ==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      ink: '>=5.0.0'
-      react: '>=18.0.0'
-
   ink-spinner@5.0.0:
     resolution: {integrity: sha512-EYEasbEjkqLGyPOUc8hBJZNuC5GvXGMLu0w5gdTNskPc7Izc5vO3tdQEYnzvshucyGCBXc86ig0ujXPMWaQCdA==}
     engines: {node: '>=14.16'}
@@ -4202,10 +4192,6 @@ packages:
   to-regex-range@5.0.1:
     resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
     engines: {node: '>=8.0'}
-
-  to-rotated@1.0.0:
-    resolution: {integrity: sha512-KsEID8AfgUy+pxVRLsWp0VzCa69wxzUDZnzGbyIST/bcgcrMvTYoFBX/QORH4YApoD89EDuUovx4BTdpOn319Q==}
-    engines: {node: '>=18'}
 
   toidentifier@1.0.1:
     resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
@@ -7102,13 +7088,6 @@ snapshots:
       react: 19.3.1
       strip-ansi: 7.2.0
 
-  ink-select-input@6.2.0(ink@8.0.0(@types/react@19.3.0)(react@19.3.1))(react@19.3.1):
-    dependencies:
-      figures: 6.1.0
-      ink: 8.0.0(@types/react@19.3.0)(react@19.3.1)
-      react: 19.3.1
-      to-rotated: 1.0.0
-
   ink-spinner@5.0.0(ink@8.0.0(@types/react@19.3.0)(react@19.3.1))(react@19.3.1):
     dependencies:
       cli-spinners: 2.9.2
@@ -8352,8 +8331,6 @@ snapshots:
   to-regex-range@5.0.1:
     dependencies:
       is-number: 7.0.0
-
-  to-rotated@1.0.0: {}
 
   toidentifier@1.0.1: {}
 

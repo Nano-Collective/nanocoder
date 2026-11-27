@@ -22,7 +22,12 @@ export const contextMaxCommand: StatefulCommand = {
 	description:
 		'Set maximum context length for this session (e.g. /context-max 128k or /context-max 1m, --reset to clear)',
 	run: async context => {
-		const {addToChatQueue: onAddToChatQueue, model, providerConfig} = context;
+		const {
+			addToChatQueue: onAddToChatQueue,
+			model,
+			provider,
+			providerConfig,
+		} = context;
 		const trimmed = context.argText.trim();
 		const args = trimmed ? trimmed.split(/\s+/) : [];
 
@@ -49,10 +54,10 @@ export const contextMaxCommand: StatefulCommand = {
 				return 'done-after-render';
 			}
 
-			setSessionContextLimit(limit);
+			setSessionContextLimit(limit, {provider, model});
 			onAddToChatQueue(
 				successMsg(
-					`Session context limit set to ${limit.toLocaleString()} tokens.`,
+					`Session context limit set to ${limit.toLocaleString()} tokens for ${model}. It does not apply to other models or providers.`,
 					'context-max-set',
 				),
 			);

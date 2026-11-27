@@ -822,3 +822,42 @@ test('a tight row drops the voice hint first and keeps the voice label', t => {
 	t.notRegex(output, /Ctrl\+G to talk/);
 	t.regex(output, /Shift\+Tab to cycle/, 'the voice hint gives way before the shift hint');
 });
+
+// ============================================================================
+// Background job indicator
+// ============================================================================
+
+test('StatusBar hides the job indicator when no jobs are running', t => {
+	const {lastFrame} = render(
+		<StatusBar
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+		/>,
+	);
+	t.notRegex(stripAnsi(lastFrame()!), /jobs?\b/);
+});
+
+test('StatusBar shows the number of running jobs', t => {
+	const {lastFrame} = render(
+		<StatusBar
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			backgroundJobCount={2}
+		/>,
+	);
+	t.regex(stripAnsi(lastFrame()!), /· 2 jobs/);
+});
+
+test('StatusBar uses the singular label for one job', t => {
+	const {lastFrame} = render(
+		<StatusBar
+			developmentMode="normal"
+			colors={mockColors}
+			contextPercentUsed={null}
+			backgroundJobCount={1}
+		/>,
+	);
+	t.regex(stripAnsi(lastFrame()!), /· 1 job(?!s)/);
+});

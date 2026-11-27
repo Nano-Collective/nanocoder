@@ -112,6 +112,77 @@ test('mlx-server template: uses default baseUrl when empty', t => {
 	t.is(config.baseUrl, 'http://localhost:8080/v1');
 });
 
+test('rapid-mlx template: is present with expected fields and defaults', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'rapid-mlx');
+	t.truthy(template);
+	t.is(template!.name, 'Rapid-MLX');
+
+	const providerNameField = template!.fields.find(
+		f => f.name === 'providerName',
+	);
+	const baseUrlField = template!.fields.find(f => f.name === 'baseUrl');
+	const modelField = template!.fields.find(f => f.name === 'model');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+
+	t.is(providerNameField?.default, 'Rapid-MLX');
+	t.true(providerNameField?.required);
+	t.is(baseUrlField?.default, 'http://localhost:8000/v1');
+	t.is(baseUrlField?.validator?.('http://localhost:8000/v1'), undefined);
+	t.truthy(baseUrlField?.validator?.('not-a-url'));
+	t.true(modelField?.required);
+	t.is(modelField?.default, '');
+	t.is(apiKeyField, undefined);
+});
+
+test('rapid-mlx template: builds config with default and custom baseUrl and no apiKey', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'rapid-mlx');
+	t.truthy(template);
+
+	const defaultConfig = template!.buildConfig({
+		providerName: '',
+		baseUrl: '',
+		model: 'mlx-community/Qwen3.5-4B-MLX-4bit',
+	});
+
+	t.deepEqual(defaultConfig, {
+		name: 'Rapid-MLX',
+		baseUrl: 'http://localhost:8000/v1',
+		models: ['mlx-community/Qwen3.5-4B-MLX-4bit'],
+	});
+	t.is(defaultConfig.apiKey, undefined);
+	t.false('apiKey' in defaultConfig);
+
+	const customConfig = template!.buildConfig({
+		providerName: 'Rapid-MLX Local',
+		baseUrl: 'http://127.0.0.1:9000/v1',
+		model: 'qwen3.5-4b-4bit',
+	});
+
+	t.deepEqual(customConfig, {
+		name: 'Rapid-MLX Local',
+		baseUrl: 'http://127.0.0.1:9000/v1',
+		models: ['qwen3.5-4b-4bit'],
+	});
+	t.is(customConfig.apiKey, undefined);
+});
+
+test('rapid-mlx template: parses comma-separated models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'rapid-mlx');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Rapid-MLX',
+		baseUrl: 'http://localhost:8000/v1',
+		model: 'mlx-community/Qwen3.5-4B-MLX-4bit,  qwen3.5-4b-4bit , ',
+	});
+
+	t.deepEqual(config.models, [
+		'mlx-community/Qwen3.5-4B-MLX-4bit',
+		'qwen3.5-4b-4bit',
+	]);
+	t.is(config.apiKey, undefined);
+});
+
 test('custom template: says the API key is optional only for local servers', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 	const apiKey = template?.fields.find(field => field.name === 'apiKey');

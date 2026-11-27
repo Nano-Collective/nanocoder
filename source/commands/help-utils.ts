@@ -34,6 +34,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'copy',
 		'expand',
 		'export',
+		'jobs',
 		'plans',
 		'rename',
 		'resume',
@@ -198,6 +199,16 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/init [--preset <react|nextjs|rust>] [--force] [--lean]',
 		options: ['--preset <react|nextjs|rust>', '--force', '--lean'],
 		examples: ['/init', '/init --preset react', '/init --force --lean'],
+	},
+	jobs: {
+		usage: '/jobs [id|kill <id>|kill all]',
+		options: ['id', 'kill <id>', 'kill all'],
+		examples: [
+			'/jobs',
+			'/jobs 3f2a1b9c',
+			'/jobs kill 3f2a1b9c',
+			'/jobs kill all',
+		],
 	},
 	login: {
 		usage: '/login <codex|copilot> [provider name]',

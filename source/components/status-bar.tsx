@@ -55,6 +55,8 @@ interface StatusBarProps {
 	activeEditor?: ActiveEditorState | null;
 	taskInfo?: TaskIndicatorInfo | null;
 	isSaving?: boolean;
+	/** Running background bash jobs; the badge hides when this is 0/unset. */
+	backgroundJobCount?: number;
 	voice?: VoiceIndicatorInfo | null;
 	/**
 	 * Columns the caller's own wrapper indents this row by. The width budget
@@ -91,6 +93,7 @@ export const StatusBar = React.memo(
 		activeEditor,
 		taskInfo,
 		isSaving,
+		backgroundJobCount = 0,
 		voice,
 		indentColumns = 0,
 	}: StatusBarProps) => {
@@ -141,7 +144,15 @@ export const StatusBar = React.memo(
 		// truncates.
 		const ctxPrefix = contextSource === 'api' ? '' : '~';
 
-		// Mode, tune, ctx, and the collapsed-task progress readout never
+		// Background jobs outlive turns, so their count is a standing part of
+		// the mode line while any are running (like ctx), not a droppable hint.
+		const jobsLabel =
+			backgroundJobCount > 0
+				? `${backgroundJobCount} job${backgroundJobCount === 1 ? '' : 's'}`
+				: '';
+		const jobsSegment = jobsLabel ? ` · ${jobsLabel}` : '';
+
+		// Mode, tune, ctx, jobs, and the collapsed-task progress readout never
 		// truncate. Session name and the filename portion of the editor pill
 		// share whatever room is left, each truncating with an ellipsis; if both
 		// fit fully neither truncates; if both overflow they split the remaining
@@ -209,6 +220,7 @@ export const StatusBar = React.memo(
 				tuneSegment.length +
 				taskBaseSegment.length +
 				ctxSegment.length +
+				jobsSegment.length +
 				voiceSegment.length +
 				sessionSeparator.length +
 				editorSeparator.length +
@@ -284,6 +296,7 @@ export const StatusBar = React.memo(
 				taskHintExtra +
 				savingExtra +
 				ctxSegment.length +
+				jobsSegment.length +
 				voiceSegment.length +
 				voiceHint.length +
 				sessionSeparator.length +
@@ -377,6 +390,12 @@ export const StatusBar = React.memo(
 						>
 							{taskLabel}
 						</Text>
+					</>
+				)}
+				{jobsLabel && (
+					<>
+						<Text color={colors.secondary}> · </Text>
+						<Text color={colors.info}>{jobsLabel}</Text>
 					</>
 				)}
 				{showSaving && (

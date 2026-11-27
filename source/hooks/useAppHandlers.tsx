@@ -85,6 +85,7 @@ interface UseAppHandlersProps {
 
 	// State setters
 	updateMessages: (newMessages: Message[]) => void;
+	appendMessages?: (messages: Message[]) => void;
 	setIsCancelling: (value: boolean) => void;
 	setDevelopmentMode: (
 		updater: DevelopmentMode | ((prev: DevelopmentMode) => DevelopmentMode),
@@ -244,6 +245,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		tune,
 		updateInfo,
 		updateMessages,
+		appendMessages,
 	} = props;
 	const logger = getLogger();
 	// Last mode-switch model toast, so rapid Shift+Tab cycling doesn't stack
@@ -1056,6 +1058,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					setIsToolExecuting: setIsToolExecuting,
 					onCommandComplete: () => setIsConversationComplete(true),
 					setMessages: updateMessages,
+					appendMessages: appendMessages,
 					messages: messages,
 					provider: currentProvider,
 					providerConfig: currentProviderConfig,
@@ -1092,6 +1095,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			setLiveComponent,
 			setIsToolExecuting,
 			updateMessages,
+			appendMessages,
 			messages,
 			currentProvider,
 			currentProviderConfig,

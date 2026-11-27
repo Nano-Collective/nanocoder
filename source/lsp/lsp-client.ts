@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import type {ChildProcess} from 'child_process';
 import spawn from 'cross-spawn';
 import {createChildLogger} from '@/utils/logging';
+import {signalProcessTree} from '@/utils/process-tree';
 import {
 	CodeAction,
 	CodeActionParams,
@@ -31,6 +32,30 @@ import {
 	TextEdit,
 	WorkspaceFolder,
 } from './protocol';
+
+/**
+ * Whether the spawned process hasn't exited yet. Once the child has exited
+ * its pid may belong to something else, so it is only signalled while it is
+ * still running.
+ */
+function isRunning(child: ChildProcess): boolean {
+	return child.exitCode === null && child.signalCode === null;
+}
+
+/**
+ * End a language server. On Windows an npm-installed server starts through a
+ * .cmd shim, so the child is cmd.exe and killing it alone leaves the server
+ * running: signalProcessTree ends the whole tree with taskkill /T. On POSIX
+ * the spawn isn't detached, so the child shares Nanocoder's process group
+ * and a group signal would not be aimed at it: kill the child itself.
+ */
+function stopServerProcess(child: ChildProcess): void {
+	if (process.platform === 'win32') {
+		signalProcessTree(child);
+	} else {
+		child.kill();
+	}
+}
 
 export interface LSPServerConfig {
 	name: string;
@@ -145,7 +170,7 @@ export class LSPClient extends EventEmitter {
 						// it, so end it here — as a deliberate stop, so its exit is
 						// never reported as a crash of a server that never started.
 						this.stopping = true;
-						if (!child.killed) child.kill();
+						if (isRunning(child)) stopServerProcess(child);
 						reject(error);
 					});
 			} catch (error) {
@@ -175,8 +200,8 @@ export class LSPClient extends EventEmitter {
 		}
 
 		// Force kill if still running
-		if (this.process && !this.process.killed) {
-			this.process.kill();
+		if (this.process && isRunning(this.process)) {
+			stopServerProcess(this.process);
 		}
 
 		// Clear all pending request timeouts

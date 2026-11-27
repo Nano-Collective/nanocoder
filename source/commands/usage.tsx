@@ -177,7 +177,7 @@ export const usageCommand: Command = {
 		};
 
 		// Get context limit: session override takes priority
-		const sessionLimit = getSessionContextLimit();
+		const sessionLimit = getSessionContextLimit({provider, model});
 		const contextLimit =
 			sessionLimit ??
 			(await getModelContextLimit(model, {

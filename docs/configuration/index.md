@@ -117,7 +117,7 @@ Names are matched case-insensitively. A key that is skipped is reported in a war
 | `NANOCODER_PROFILE` | Default profile name to activate (overridden by `--profile`; overrides `nanocoder.defaultProfile`). See [Named Configuration Profiles](#named-configuration-profiles) |
 | `NANOCODER_DEFAULT_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout in milliseconds (default: 5000) |
 | `NANOCODER_MAX_TURNS` | Maximum LLM turns for headless runs (`--plain`, ACP, and subagents unless `subagentMaxTurns` is set). Overrides `nanocoder.headless.maxTurns`; default 200. See [Headless](#headless) |
-| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
+| `NANOCODER_TRUST_DIRECTORY` | Set to `1` to trust the working directory and save it to `trustedDirectories` for later runs. Honoured by the interactive TUI, `run` (Ink and `--plain`), headless `nanocoder review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`. Must come from your shell: a project `.env` cannot set it. See [Directory trust](../getting-started/index.md#directory-trust) |
 | `NANOCODER_SKILLS_INDEX` | URL or local path of the skills index used by `nanocoder skills add` (same as `--index`). See [Skills](../features/skills.md) |
 | `NANOCODER_DOCTOR_PROBE` | Set to `0` to stop `/doctor` from probing local provider ports |
 
@@ -149,6 +149,8 @@ These are covered in detail on the [Logging](logging.md) page.
 You can reference environment variables in your configuration files using substitution syntax:
 
 **Syntax:** `$VAR_NAME`, `${VAR_NAME}`, or `${VAR_NAME:-default}` (use `$$` to escape a literal `$`, e.g. `pa$$WORD`)
+
+As in the shell, `${VAR_NAME:-default}` uses the default when the variable is unset or set to an empty value. `$VAR_NAME` and `${VAR_NAME}` substitute an empty value as is.
 
 Substitution is applied recursively to all string fields in provider and MCP server configurations — any string value can reference environment variables, not just specific fields.
 
