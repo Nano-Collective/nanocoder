@@ -433,6 +433,13 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
 		apiKeyPrompt: 'API Key (from https://www.runcrate.ai/dashboard/api-keys)',
 		modelDefault: 'deepseek-ai/DeepSeek-V4.1-Flash',
 	}),
+	apiKeyTemplate({
+		id: 'llmtr',
+		name: 'LLMTR',
+		baseUrl: 'https://llmtr.com/v1',
+		apiKeyPrompt: 'API Key (from https://llmtr.com/dashboard/keys)',
+		modelDefault: 'qwen/qwen3.8-27b-free',
+	}),
 	{
 		id: 'openai',
 		name: 'OpenAI',
