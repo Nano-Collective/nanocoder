@@ -890,7 +890,15 @@ function mapStatusChar(char: string): FileChangeStatus {
 }
 
 /**
- * Parse git status --porcelain output
+ * Parse `git status --porcelain -z` output.
+ *
+ * The caller must request `-z`: NUL-delimited records are never quoted or
+ * escaped, so paths with spaces or non-ASCII characters survive intact
+ * (#2448). Line-based porcelain output wraps such paths in C-style quotes,
+ * which broke the stats lookup in the git tools.
+ *
+ * Record layout: `XY <path>` per NUL-terminated record. Renames and copies
+ * carry a second NUL-terminated record holding the original path.
  */
 export function parseGitStatus(statusOutput: string): {
 	staged: FileChange[];
@@ -903,14 +911,28 @@ export function parseGitStatus(statusOutput: string): {
 	const untracked: string[] = [];
 	const conflicts: string[] = [];
 
-	const lines = statusOutput.split('\n').filter(line => line);
+	const records = statusOutput.split('\0').filter(record => record.length > 0);
 
-	for (const line of lines) {
-		if (line.length < 3) continue;
+	for (let i = 0; i < records.length; i++) {
+		const record = records[i]!;
+		if (record.length < 3) continue;
 
-		const indexStatus = line[0];
-		const workTreeStatus = line[1];
-		const path = line.slice(3);
+		const indexStatus = record[0];
+		const workTreeStatus = record[1];
+		const path = record.slice(3);
+
+		// Renames and copies emit the new path in this record and the
+		// original path as the next NUL-terminated record.
+		const isRenameOrCopy =
+			indexStatus === 'R' ||
+			indexStatus === 'C' ||
+			workTreeStatus === 'R' ||
+			workTreeStatus === 'C';
+		let oldPath: string | undefined;
+		if (isRenameOrCopy) {
+			oldPath = records[i + 1];
+			i++;
+		}
 
 		// Detect conflicts
 		if (
@@ -933,6 +955,7 @@ export function parseGitStatus(statusOutput: string): {
 		if (indexStatus !== ' ' && indexStatus !== '?') {
 			staged.push({
 				path,
+				oldPath,
 				status: mapStatusChar(indexStatus),
 				additions: 0,
 				deletions: 0,
@@ -944,6 +967,7 @@ export function parseGitStatus(statusOutput: string): {
 		if (workTreeStatus !== ' ' && workTreeStatus !== '?') {
 			unstaged.push({
 				path,
+				oldPath,
 				status: mapStatusChar(workTreeStatus),
 				additions: 0,
 				deletions: 0,
@@ -957,6 +981,12 @@ export function parseGitStatus(statusOutput: string): {
 
 /**
  * Get diff stats for files (additions/deletions)
+ *
+ * Uses `git diff --numstat -z`: NUL-delimited output is never quoted or
+ * escaped, so paths with spaces or non-ASCII characters are preserved
+ * (#2448). Rename records carry an empty path field followed by the old and
+ * new path as separate NUL-terminated tokens; both are keyed so lookups by
+ * either name succeed.
  */
 export async function getDiffStats(
 	staged: boolean = false,
@@ -964,18 +994,29 @@ export async function getDiffStats(
 	const stats = new Map<string, {additions: number; deletions: number}>();
 
 	try {
-		const args = ['diff', '--numstat'];
+		const args = ['diff', '--numstat', '-z'];
 		if (staged) args.push('--cached');
 
 		const output = await execGitReadOnly(args);
 		if (!output.trim()) return stats;
 
-		for (const line of output.split('\n')) {
-			const parts = line.split('\t');
-			if (parts.length >= 3) {
-				const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
-				const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
-				const path = parts[2];
+		const tokens = output.split('\0');
+		for (let i = 0; i < tokens.length; i++) {
+			const parts = tokens[i]!.split('\t');
+			if (parts.length < 3) continue;
+
+			const additions = parts[0] === '-' ? 0 : parseInt(parts[0]!, 10) || 0;
+			const deletions = parts[1] === '-' ? 0 : parseInt(parts[1]!, 10) || 0;
+			const path = parts[2]!;
+
+			if (path === '') {
+				// Rename/copy: the next two tokens are the old and new path.
+				const oldPath = tokens[i + 1];
+				const newPath = tokens[i + 2];
+				i += 2;
+				if (oldPath) stats.set(oldPath, {additions, deletions});
+				if (newPath) stats.set(newPath, {additions, deletions});
+			} else {
 				stats.set(path, {additions, deletions});
 			}
 		}

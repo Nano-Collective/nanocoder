@@ -24,6 +24,7 @@ import {
 	execGit,
 	execGitBuffer,
 	execGitReadOnly,
+	getDiffStats,
 	isGitAvailable,
 	isGhAvailable,
 	resetBinaryAvailabilityCacheForTests,
@@ -196,8 +197,7 @@ test.serial('PATH scan ignores directories named like the binary', t => {
 // ============================================================================
 
 test('parseGitStatus parses staged modified files', t => {
-	const statusOutput = `M  src/file1.ts
-A  src/file2.ts`;
+	const statusOutput = 'M  src/file1.ts\0A  src/file2.ts\0';
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 2);
@@ -208,7 +208,7 @@ A  src/file2.ts`;
 });
 
 test('parseGitStatus parses staged deleted files', t => {
-	const statusOutput = `D  deleted-file.ts`;
+	const statusOutput = `D  deleted-file.ts\0`;
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 1);
@@ -217,16 +217,17 @@ test('parseGitStatus parses staged deleted files', t => {
 });
 
 test('parseGitStatus parses staged renamed files', t => {
-	const statusOutput = `R  old-name.ts -> new-name.ts`;
+	const statusOutput = 'R  new-name.ts\0old-name.ts\0';
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 1);
 	t.is(result.staged[0]?.status, 'renamed');
+	t.is(result.staged[0]?.path, 'new-name.ts');
+	t.is(result.staged[0]?.oldPath, 'old-name.ts');
 });
 
 test('parseGitStatus parses unstaged modified files', t => {
-	const statusOutput = ` M src/file1.ts
- D src/file2.ts`;
+	const statusOutput = ' M src/file1.ts\0 D src/file2.ts\0';
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.unstaged.length, 2);
@@ -235,8 +236,7 @@ test('parseGitStatus parses unstaged modified files', t => {
 });
 
 test('parseGitStatus parses untracked files', t => {
-	const statusOutput = `?? new-file.ts
-?? another-file.ts`;
+	const statusOutput = '?? new-file.ts\0?? another-file.ts\0';
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.untracked.length, 2);
@@ -253,7 +253,7 @@ test('parseGitStatus handles empty input', t => {
 });
 
 test('parseGitStatus detects conflicts - UU', t => {
-	const statusOutput = `UU conflicted-file.ts`;
+	const statusOutput = `UU conflicted-file.ts\0`;
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.conflicts.length, 1);
@@ -261,7 +261,7 @@ test('parseGitStatus detects conflicts - UU', t => {
 });
 
 test('parseGitStatus detects conflicts - AA', t => {
-	const statusOutput = `AA both-added.ts`;
+	const statusOutput = `AA both-added.ts\0`;
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.conflicts.length, 1);
@@ -269,17 +269,15 @@ test('parseGitStatus detects conflicts - AA', t => {
 });
 
 test('parseGitStatus detects conflicts - DD', t => {
-	const statusOutput = `DD both-deleted.ts`;
+	const statusOutput = `DD both-deleted.ts\0`;
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.conflicts.length, 1);
 });
 
 test('parseGitStatus handles mixed status', t => {
-	const statusOutput = `M  staged-modified.ts
- M unstaged-modified.ts
-?? untracked.ts
-UU conflict.ts`;
+	const statusOutput =
+		'M  staged-modified.ts\0 M unstaged-modified.ts\0?? untracked.ts\0UU conflict.ts\0';
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 1);
@@ -288,15 +286,19 @@ UU conflict.ts`;
 	t.is(result.conflicts.length, 1);
 });
 
-test('parseGitStatus handles files with spaces', t => {
-	const statusOutput = `M  "file with spaces.ts"`;
+// NUL-delimited output is never quoted or escaped, so paths with spaces or
+// non-ASCII characters must arrive intact (#2448).
+test('parseGitStatus preserves paths with spaces and non-ASCII characters', t => {
+	const statusOutput = 'M  my notes.txt\0M  café.txt\0';
 
 	const result = parseGitStatus(statusOutput);
-	t.is(result.staged.length, 1);
+	t.is(result.staged.length, 2);
+	t.is(result.staged[0]?.path, 'my notes.txt');
+	t.is(result.staged[1]?.path, 'café.txt');
 });
 
 test('parseGitStatus handles both staged and unstaged changes on same file', t => {
-	const statusOutput = `MM both-changes.ts`;
+	const statusOutput = `MM both-changes.ts\0`;
 
 	const result = parseGitStatus(statusOutput);
 	// File appears in both staged and unstaged
@@ -304,16 +306,64 @@ test('parseGitStatus handles both staged and unstaged changes on same file', t =
 	t.is(result.unstaged.length, 1);
 });
 
-test('parseGitStatus ignores empty lines', t => {
-	const statusOutput = `M  file1.ts
-
- M file2.ts
-
-`;
+test('parseGitStatus ignores empty records', t => {
+	const statusOutput = 'M  file1.ts\0\0 M file2.ts\0\0';
 
 	const result = parseGitStatus(statusOutput);
 	t.is(result.staged.length, 1);
 	t.is(result.unstaged.length, 1);
+});
+
+// getDiffStats Tests
+// ============================================================================
+
+// Real-repo coverage for the -z numstat parsing: paths with spaces or
+// non-ASCII characters must keep their line counts, and a rename must be
+// keyed by both its old and new path (#2448).
+test('getDiffStats reports counts for paths with spaces and non-ASCII characters', async t => {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-numstat-')));
+	try {
+		execSync('git init -q -b main', {cwd: dir});
+		execSync('git -C . config user.email test@example.com', {cwd: dir});
+		execSync('git -C . config user.name test', {cwd: dir});
+		writeFileSync(join(dir, 'my notes.txt'), 'one\n');
+		writeFileSync(join(dir, 'café.txt'), 'one\n');
+		execSync('git add -A', {cwd: dir});
+		execSync('git commit -qm init', {cwd: dir});
+		writeFileSync(join(dir, 'my notes.txt'), 'one\ntwo\n');
+		writeFileSync(join(dir, 'café.txt'), 'one\ntwo\n');
+
+		const scope = createSessionContext(dir);
+		const stats = await runInSessionContext(scope, () => getDiffStats(false));
+
+		t.deepEqual(stats.get('my notes.txt'), {additions: 1, deletions: 0});
+		t.deepEqual(stats.get('café.txt'), {additions: 1, deletions: 0});
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+test('getDiffStats keys rename records by both old and new path', async t => {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-numstat-')));
+	try {
+		execSync('git init -q -b main', {cwd: dir});
+		execSync('git -C . config user.email test@example.com', {cwd: dir});
+		execSync('git -C . config user.name test', {cwd: dir});
+		writeFileSync(join(dir, 'old-name.txt'), 'one\n');
+		execSync('git add -A', {cwd: dir});
+		execSync('git commit -qm init', {cwd: dir});
+		execSync('git -C . mv old-name.txt "new name.txt"', {cwd: dir});
+		writeFileSync(join(dir, 'new name.txt'), 'one\ntwo\n');
+		execSync('git add -A', {cwd: dir});
+
+		const scope = createSessionContext(dir);
+		const stats = await runInSessionContext(scope, () => getDiffStats(true));
+
+		t.deepEqual(stats.get('new name.txt'), {additions: 1, deletions: 0});
+		t.deepEqual(stats.get('old-name.txt'), {additions: 1, deletions: 0});
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
 });
 
 // ============================================================================
