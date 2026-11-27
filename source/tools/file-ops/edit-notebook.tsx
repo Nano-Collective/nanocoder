@@ -1,10 +1,12 @@
 import {realpath} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import ToolMessage from '@/components/tool-message';
+import {Box, Text} from 'ink';
+import ToolMessage, {CappedLines} from '@/components/tool-message';
 import {
 	enforceFirewall,
 	evaluateMutationEnvelope,
 } from '@/firewall/mutation-firewall';
+import {useTheme} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {
 	forgetReadContent,
@@ -33,6 +35,25 @@ import {
 import {validatePath} from './path-validators';
 
 const activeEdits = new Set<string>();
+
+function NotebookEditPreview({message}: {message: string}) {
+	const {colors} = useTheme();
+	return (
+		<Box flexDirection="column">
+			<Text color={colors.tool} bold>
+				edit_notebook
+			</Text>
+			<CappedLines
+				items={message.split('\n')}
+				renderItem={(line, index) => (
+					<Text key={index} color={colors.text}>
+						{line}
+					</Text>
+				)}
+			/>
+		</Box>
+	);
+}
 
 function resolveNotebookEditPath(path: string): string {
 	if (typeof path !== 'string' || !isNotebookPath(path)) {
@@ -160,11 +181,13 @@ export const editNotebookTool: NanocoderToolExport = {
 	formatter: async (args: EditNotebookArgs, result?: string) => {
 		const body =
 			result ?? (await getNotebookEditPreview(args).catch(formatError));
-		return (
-			<ToolMessage
-				title="edit_notebook"
-				message={[args.path, args.description, body].filter(Boolean).join('\n')}
-			/>
+		const message = [args.path, args.description, body]
+			.filter(Boolean)
+			.join('\n');
+		return result === undefined ? (
+			<NotebookEditPreview message={message} />
+		) : (
+			<ToolMessage title="edit_notebook" message={message} />
 		);
 	},
 	approval: createFileToolApproval<EditNotebookArgs>('edit_notebook', {

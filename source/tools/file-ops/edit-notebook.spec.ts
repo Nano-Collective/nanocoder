@@ -1,6 +1,12 @@
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {relative, resolve, join} from 'node:path';
+import {Box} from 'ink';
 import test from 'ava';
+import React from 'react';
+import stripAnsi from 'strip-ansi';
+import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
+import {calculateBoxWidth} from '@/hooks/useTerminalWidth';
+import {renderWithTheme} from '@/test-utils/render-with-theme';
 import {resolveToolApproval} from '../approval-policy.js';
 import {clearReadTracker} from '../runtime/read-tracker.js';
 import {readFileTool} from '../read-file.js';
@@ -498,4 +504,69 @@ test.serial('edit_notebook validates indexes before writing', async t => {
 		{message: /out of range/i},
 	);
 	t.is(await readFile(absolutePath, 'utf8'), before);
+});
+
+test.serial('edit_notebook approval preview stays inside the dialog at common terminal widths', async t => {
+	const {path} = await createNotebook();
+	const revision = await readRevision(path);
+	const formatter = editNotebookTool.formatter;
+	if (!formatter) throw new Error('edit_notebook formatter is not defined');
+	const preview = await formatter({
+		path,
+		operation: 'replace_source',
+		cell_index: 0,
+		notebook_revision: revision,
+		source: 'ax.set_title("Monthly sales totals")\n',
+		description:
+			'Update the chart title while keeping the rest of the notebook unchanged',
+	});
+	const originalColumns = process.stdout.columns;
+
+	try {
+		for (const columns of [108, 78]) {
+			Object.defineProperty(process.stdout, 'columns', {
+				value: columns,
+				configurable: true,
+			});
+			const width = calculateBoxWidth(columns);
+			const app = renderWithTheme(
+				React.createElement(
+					TitledBoxWithPreferences,
+					{
+						title: 'Tool Approval',
+						width,
+						paddingX: 2,
+						paddingY: 1,
+						borderColor: 'cyan',
+					},
+					React.createElement(
+						Box,
+						{flexDirection: 'column'},
+						React.createElement(
+							Box,
+							{marginBottom: 1, flexDirection: 'column'},
+							React.createElement(Box, null, preview),
+						),
+					),
+				),
+			);
+			const frame = app.lastFrame();
+			app.unmount();
+
+			t.truthy(frame);
+			const lines = stripAnsi(frame!).split('\n').map(line => line.trimEnd());
+			const widestLine = Math.max(...lines.map(line => line.length));
+			t.true(
+				widestLine <= width,
+				`preview should stay within the ${width}-column dialog at ${columns} terminal columns; widest line was ${widestLine}`,
+			);
+			t.regex(frame!, /Replace source in cell 0/i);
+			t.regex(frame!, /Monthly sales totals/);
+		}
+	} finally {
+		Object.defineProperty(process.stdout, 'columns', {
+			value: originalColumns,
+			configurable: true,
+		});
+	}
 });
