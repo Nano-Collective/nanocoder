@@ -19,23 +19,44 @@ function findLastUserMessage(messages: Message[]) {
 	return undefined;
 }
 
-function parseRetryArgs(args: string[]): RetryArgs {
+const RETRY_USAGE =
+	'Usage: /retry [--model <id>] or /retry --provider <name> --model <id>';
+
+const RETRY_FLAGS = {'--model': 'model', '--provider': 'provider'} as const;
+
+// Every argument must be one /retry can use: an argument it cannot read is an
+// error, so a typo never re-sends the prompt on a model the user did not pick.
+function parseRetryArgs(args: string[]): RetryArgs | {error: string} {
 	const parsed: RetryArgs = {};
 
 	for (let index = 0; index < args.length; index++) {
-		const arg = args[index];
-		const next = args[index + 1];
-
-		if (arg === '--model' && next) {
-			parsed.model = next;
-			index++;
-			continue;
+		const arg = args[index] ?? '';
+		const equals = arg.indexOf('=');
+		const flag = equals === -1 ? arg : arg.slice(0, equals);
+		const key = RETRY_FLAGS[flag as keyof typeof RETRY_FLAGS];
+		if (!key) {
+			return {error: `Unknown argument "${arg}".`};
 		}
 
-		if (arg === '--provider' && next) {
-			parsed.provider = next;
-			index++;
+		// --model <id> or --model=<id>
+		let value: string | undefined;
+		if (equals === -1) {
+			const next = args[index + 1];
+			if (next !== undefined && !next.startsWith('--')) {
+				value = next;
+				index++;
+			}
+		} else {
+			value = arg.slice(equals + 1);
 		}
+		if (!value) {
+			return {error: `${flag} needs a value.`};
+		}
+		parsed[key] = value;
+	}
+
+	if (parsed.provider && !parsed.model) {
+		return {error: '--provider needs --model as well.'};
 	}
 
 	return parsed;
@@ -55,9 +76,14 @@ export const retryCommand: StatefulCommand = {
 		}
 
 		// Quote-aware, so `--model "name with spaces"` stays one value.
-		const {model, provider} = parseRetryArgs(
-			parseCustomCommandArgs(context.argText),
-		);
+		const parsed = parseRetryArgs(parseCustomCommandArgs(context.argText));
+		if ('error' in parsed) {
+			context.addToChatQueue(
+				errorMsg(`${parsed.error} ${RETRY_USAGE}`, 'retry-error'),
+			);
+			return 'done';
+		}
+		const {model, provider} = parsed;
 		if (model) {
 			if (!context.switchModel) {
 				context.addToChatQueue(
