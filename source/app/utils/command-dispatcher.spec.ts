@@ -185,17 +185,40 @@ test.serial('a project command named like a stateful built-in still wins', async
 
 test.serial('a stateful command that throws still releases its spinner', async t => {
 	const live: React.ReactNode[] = [];
-	await t.throwsAsync(
-		dispatchSlashCommand(
-			'/dispatcher-slow-failure',
-			createOptions({setLiveComponent: node => live.push(node)}),
-		),
-		{message: 'boom'},
+	await dispatchSlashCommand(
+		'/dispatcher-slow-failure',
+		createOptions({setLiveComponent: node => live.push(node)}),
 	);
 	t.is(live.length, 2);
 	t.true(React.isValidElement(live[0]));
 	t.is(live[1], null);
 });
+
+test.serial(
+	'a command that throws is reported in the chat and completes the turn',
+	async t => {
+		const queued: React.ReactNode[] = [];
+		let completed = 0;
+
+		await t.notThrowsAsync(
+			dispatchSlashCommand(
+				'/dispatcher-slow-failure',
+				createOptions({
+					onAddToChatQueue: node => queued.push(node),
+					onCommandComplete: () => completed++,
+				}),
+			),
+			'a throwing handler must not reject out of the dispatcher',
+		);
+
+		t.is(queued.length, 1);
+		t.is(queuedText(queued[0]), '/dispatcher-slow-failure failed: boom');
+		t.is(completed, 0, 'the error renders before the turn completes');
+
+		await wait(DELAY_COMMAND_COMPLETE_MS + 25);
+		t.is(completed, 1);
+	},
+);
 
 for (const [message, mode] of [
 	['/model', 'model-selection'],
