@@ -138,6 +138,12 @@ test('formatCronHuman formats day-of-week lists', t => {
 	t.is(result, 'Mon, Wed, Fri at 9:00');
 });
 
+test('formatCronHuman formats day-of-week lists that contain a range', t => {
+	t.is(formatCronHuman('0 9 * * 1-3,5'), 'Mon-Wed, Fri at 9:00');
+	t.is(formatCronHuman('0 9 * * 1,3-5'), 'Mon, Wed-Fri at 9:00');
+	t.is(formatCronHuman('0 9 * * MON-WED,FRI'), 'Mon-Wed, Fri at 9:00');
+});
+
 test('formatCronHuman formats monthly pattern', t => {
 	t.is(formatCronHuman('0 9 1 * *'), 'monthly on day 1 at 9:00');
 	t.is(formatCronHuman('30 18 15 * *'), 'monthly on day 15 at 18:30');

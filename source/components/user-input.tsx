@@ -20,6 +20,7 @@ import {useReverseSearch} from '@/components/composer/useReverseSearch';
 import {useShortcutsOverlay} from '@/components/composer/useShortcutsOverlay';
 import {StatusBar, type VoiceIndicatorInfo} from '@/components/status-bar';
 import TextInput, {type TextInputHandle} from '@/components/text-input';
+import {useBackgroundJobCount} from '@/hooks/useBackgroundJobCount';
 import {useInputState} from '@/hooks/useInputState';
 import {useResponsiveTerminal, useTerminalRows} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
@@ -153,6 +154,7 @@ export default function UserInput({
 	const {isFocused, focus} = useFocus({autoFocus: !disabled, id: 'user-input'});
 	const effectiveFocus = forceFocus || isFocused;
 	const {colors} = useTheme();
+	const backgroundJobCount = useBackgroundJobCount();
 	const inputState = useInputState();
 	const uiState = useUIStateContext();
 	const {isNarrow, actualWidth, truncate} = useResponsiveTerminal();
@@ -828,6 +830,7 @@ export default function UserInput({
 					taskInfo={taskInfo}
 					isSaving={isSaving}
 					voice={voice}
+					backgroundJobCount={backgroundJobCount}
 				/>
 			</Box>
 		);
@@ -967,6 +970,7 @@ export default function UserInput({
 					taskInfo={taskInfo}
 					isSaving={isSaving}
 					voice={voice}
+					backgroundJobCount={backgroundJobCount}
 				/>
 			</Box>
 		</>

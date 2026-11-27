@@ -18,6 +18,7 @@ import type {HooksConfig} from '@/types/config';
 import {resetShutdownManager} from '@/utils/shutdown/shutdown-manager.js';
 import {processAssistantResponse, resetFallbackNotice, resetLastTurnHadReasoning} from './conversation-loop.js';
 import type {
+	ApiCallRecord,
 	ApiUsageSnapshot,
 	LLMChatResponse,
 	Message,
@@ -328,6 +329,7 @@ const scriptedClient = (
 		content?: string;
 		toolCalls?: ToolCall[];
 		toolsDisabled?: boolean;
+		usage?: LLMChatResponse['usage'];
 	}>,
 ) => {
 	const requests: Message[][] = [];
@@ -349,6 +351,7 @@ const scriptedClient = (
 						},
 					],
 					toolsDisabled: reply.toolsDisabled ?? false,
+					usage: reply.usage,
 				};
 			},
 		},
@@ -4301,4 +4304,65 @@ test.serial('processAssistantResponse - nanocoder.verify also counts tools the u
 	t.is(calls, 4);
 	t.true(seen[2]?.includes('`pnpm test` (not run)'));
 	t.true(notes.includes('Verification: ✓ pnpm test (exit 0)'));
+});
+
+test.serial('processAssistantResponse - records api call usage for malformed tool-call retries', async t => {
+	const usage = {inputTokens: 1000, outputTokens: 100, totalTokens: 1100};
+	const {client, requests} = scriptedClient([
+		{content: '[tool_use: read_file]', toolsDisabled: true, usage},
+		{content: 'Recovered answer', usage},
+	]);
+	const records: ApiCallRecord[] = [];
+
+	await processAssistantResponse(
+		createDefaultParams({
+			client,
+			toolManager: createMockToolManager({tools: ['read_file']}),
+			onApiCallComplete: (record: ApiCallRecord) => {
+				records.push(record);
+			},
+		}),
+	);
+
+	t.is(requests.length, 2, 'the malformed turn is retried once');
+	t.is(records.length, 2, 'both the malformed attempt and retry are recorded');
+	t.is(records[0]?.totalTokens, 1100);
+	t.is(records[1]?.totalTokens, 1100);
+});
+
+test.serial('processAssistantResponse - records api call usage when auto-compaction runs while clearing lastApiUsage', async t => {
+	setSessionContextLimit(100);
+	const usage = {inputTokens: 1000, outputTokens: 100, totalTokens: 1100};
+	const {client} = scriptedClient([{content: 'Done.', usage}]);
+	const records: ApiCallRecord[] = [];
+	const lastUsages: Array<ApiUsageSnapshot | null> = [];
+	const oldContent = 'old context sentence. '.repeat(120);
+
+	try {
+		await processAssistantResponse(
+			createDefaultParams({
+				client,
+				messages: [
+					{role: 'user', content: oldContent},
+					{role: 'assistant', content: 'Understood.'},
+					{role: 'user', content: 'Another earlier turn.'},
+					{role: 'assistant', content: 'Acknowledged.'},
+					{role: 'user', content: 'Finish up.'},
+				],
+				setLastApiUsage: (snapshot: ApiUsageSnapshot | null) => {
+					lastUsages.push(snapshot);
+				},
+				onApiCallComplete: (record: ApiCallRecord) => {
+					records.push(record);
+				},
+			}),
+		);
+	} finally {
+		resetSessionContextLimit();
+		resetAutoCompactSession();
+	}
+
+	t.is(records.length, 1, 'the billed call that triggered compaction is still recorded');
+	t.is(records[0]?.totalTokens, 1100);
+	t.is(lastUsages.at(-1), null, 'lastApiUsage snapshot is cleared after compaction');
 });

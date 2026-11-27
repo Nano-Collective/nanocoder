@@ -15,7 +15,9 @@ import {isWindowsCmd} from '@/utils/shell-args';
 
 const TOOL_NAME_REGEX = /^[a-z][a-z0-9_]*$/;
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_TIMEOUT_MS = 300_000;
+/** Two hours. Long builds and test suites run as custom tools too; the cap only
+ * catches a typo like an extra zero, not a deliberately long job. */
+const MAX_TIMEOUT_MS = 7_200_000;
 /** Generous cap on user-written validator regex strings. 1KB of regex is
  * already absurd for parameter validation; anything longer is a copy-paste
  * accident waiting to be a ReDoS footgun. */
@@ -344,7 +346,7 @@ function parseTimeout(value: unknown): number {
 	}
 	if (n > MAX_TIMEOUT_MS) {
 		throw new CustomToolParseError(
-			`"timeout_ms" exceeds maximum of ${MAX_TIMEOUT_MS}`,
+			`"timeout_ms" exceeds maximum of ${MAX_TIMEOUT_MS} (2 hours)`,
 		);
 	}
 	return n;

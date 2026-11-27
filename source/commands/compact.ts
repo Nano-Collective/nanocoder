@@ -107,6 +107,9 @@ async function checkOnceThresholdGate(
  * --auto-off      - Disable auto-compact for this session
  * --threshold <n> - Set auto-compact threshold (50-95%) for this session
  */
+const COMPACT_USAGE =
+	'Usage: /compact [--llm | --mechanical] [--aggressive | --conservative | --default] [--preview], or one of --restore, --auto-on, --auto-off, --threshold <n>, --strategy llm|mechanical';
+
 export const compactCommand: StatefulCommand = {
 	name: 'compact',
 	description:
@@ -239,6 +242,18 @@ export const compactCommand: StatefulCommand = {
 						`Auto-compact threshold set to ${Math.round(thresholdValue)}% for this session.`,
 						'compact-threshold',
 					),
+				);
+				return 'done-after-render';
+			} else {
+				// An argument /compact cannot use (a typo of --preview, say, or
+				// --strategy / --threshold with no value) must not fall through to
+				// a real compaction: say so and leave the history as it is.
+				const problem =
+					arg === '--strategy' || arg === '--threshold'
+						? `${arg} needs a value.`
+						: `Unknown argument "${arg}".`;
+				onAddToChatQueue(
+					errorMsg(`${problem} ${COMPACT_USAGE}`, 'compact-args-error'),
 				);
 				return 'done-after-render';
 			}

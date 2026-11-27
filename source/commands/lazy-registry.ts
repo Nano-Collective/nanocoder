@@ -74,8 +74,7 @@ export const lazyCommands: LazyCommand[] = [
 	{
 		name: 'review',
 		description:
-			'Review a branch or PR diff for bugs, security issues, and style violations',
-		progressLabel: 'Reviewing code',
+			'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`deep` for specialist finders, `quick` for one-shot, `activity` for details)',
 		echoInvocation: true,
 		load: () => import('@/commands/review').then(m => m.reviewCommand),
 	},
@@ -212,6 +211,12 @@ export const lazyCommands: LazyCommand[] = [
 		name: 'tasks',
 		description: 'Manage your task list',
 		load: () => import('@/commands/tasks').then(m => m.tasksCommand),
+	},
+	{
+		name: 'jobs',
+		description:
+			'List background bash jobs, read their output, or stop them (/jobs, /jobs <id>, /jobs kill <id>|all)',
+		load: () => import('@/commands/jobs').then(m => m.jobsCommand),
 	},
 	{
 		name: 'plans',

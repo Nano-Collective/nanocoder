@@ -1,8 +1,11 @@
 import test from 'ava';
+import stripAnsi from 'strip-ansi';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
+import {ReviewActivityStore} from '../review/review-activity';
+import {createReviewMessage} from '../review/review-session';
 import type {Message} from '../types/core';
 import {resetKeyGeneratorForTests} from '../utils/key-generator';
 import {appendTurnContext} from '../utils/turn-context';
@@ -28,7 +31,7 @@ function renderHistory(messages: Message[], model = 'test-model'): string {
 			<>{components}</>
 		</TestThemeProvider>,
 	);
-	return lastFrame() ?? '';
+	return stripAnsi(lastFrame() ?? '');
 }
 
 test.beforeEach(() => {
@@ -153,6 +156,36 @@ test('renders assistant reasoning collapsed', t => {
 	t.regex(output, /Thought/);
 	// Collapsed: the reasoning body itself is not shown.
 	t.notRegex(output, /secret approach/);
+});
+
+test('replays a saved review with its activity summary line', t => {
+	const store = new ReviewActivityStore();
+	const finder = store.begin({
+		source: 'agent',
+		name: 'finder',
+		summary: 'Looking for defects',
+	});
+	store
+		.begin({source: 'tool', name: 'review_diff', summary: 'Reading a diff', parentId: finder.id})
+		.complete('Read the diff');
+	finder.complete('Finished');
+	store.finish('completed');
+	const saved = JSON.parse(
+		JSON.stringify(
+			createReviewMessage({
+				report: '## Grounded review · completed\n\nNo verified issues found in the reviewed scope.',
+				tier: 'Grounded',
+				status: 'completed',
+				activity: store.toSummary(),
+			}),
+		),
+	) as Message;
+
+	const output = renderHistory([{role: 'user', content: '/review'}, saved]);
+
+	t.regex(output, /Grounded review · completed · 1 agent · 1 tool call · 0 model calls/);
+	t.regex(output, /No verified issues found in the reviewed scope/);
+	t.notRegex(output, /D details/);
 });
 
 test('replays the user prompt without its per-turn context block', t => {

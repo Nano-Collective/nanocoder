@@ -3,9 +3,12 @@ import {fileURLToPath} from 'node:url';
 import React from 'react';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
+import CommandProgress from '@/components/command-progress';
 import {errorMsg, infoMsg, warningMsg} from '@/components/message-factory';
+import {ReviewActivity} from '@/components/review-activity';
 import {getShowUsageFooter} from '@/config/preferences';
 import {loadSection} from '@/conversation/prompt-builder';
+import {findLatestPersistedReview} from '@/review/review-session';
 import {stripThinkTags} from '@/tool-calling/index';
 import {
 	execGh,
@@ -15,13 +18,18 @@ import {
 	isGhAvailable,
 	truncateDiff,
 } from '@/tools/git/utils';
-import type {Command} from '@/types/commands';
+import type {Command, StatefulCommand} from '@/types/commands';
 import type {Message} from '@/types/core';
 import {buildResponseUsageBounded} from '@/usage/response-usage';
 import {formatError} from '@/utils/error-formatter';
 import {parseGitHubRepository} from '@/utils/github-repository';
 import {generateKey} from '@/utils/key-generator';
 import {getLogger} from '@/utils/logging';
+import {
+	type GroundedReviewDependencies,
+	runExclusiveReview,
+	runGroundedReviewCommand,
+} from './review-grounded';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -595,16 +603,29 @@ async function resolveReviewBase(
 	};
 }
 
-export function createReviewCommand(
+const REVIEW_DESCRIPTION =
+	'Grounded, evidence-checked review of a branch, PR, commits, or working tree (`deep` for specialist finders, `quick` for one-shot, `activity` for details)';
+
+export type QuickReviewProblem =
+	| {status: 'failed'; reason: string}
+	| {status: 'incomplete'; reasons: string[]};
+
+/**
+ * The read-only forms of `/review`: `quick` (the one-shot diff review) and
+ * `activity` (the saved trace of the latest review).
+ */
+export function createReviewView(
 	dependencies: ReviewDependencies = defaultDependencies,
+	onProblem?: (problem: QuickReviewProblem) => void,
 ): Command {
 	return {
 		name: 'review',
-		description:
-			'Review a branch or PR diff for bugs, security issues, and style violations',
-		progressLabel: 'Reviewing code',
-		echoInvocation: true,
-		handler: async (args, _messages, metadata) => {
+		description: REVIEW_DESCRIPTION,
+		handler: async (args, messages, metadata) => {
+			if (args[0]?.toLowerCase() === 'activity') {
+				return renderReviewActivity(args.slice(1), messages);
+			}
+
 			const client = metadata.client;
 			if (!client) {
 				return errorMsg('No active LLM client available.', 'review');
@@ -711,8 +732,21 @@ export function createReviewCommand(
 				if (!review) {
 					const userFacingNotices = [scopeNotice, ...baseNotices];
 					if (coverageNotice) userFacingNotices.push(coverageNotice);
-					userFacingNotices.push('Model returned an empty review.');
+					const reason = 'Model returned an empty review.';
+					userFacingNotices.push(reason);
+					onProblem?.({status: 'failed', reason});
 					return warningMsg(userFacingNotices.join('\n\n'), 'review');
+				}
+
+				const cutOffNotice =
+					response.finishReason === 'length'
+						? 'The review was cut off at the model output limit, so issues may be missing.'
+						: null;
+				const coverageNotices = [coverageNotice, cutOffNotice].filter(
+					notice => notice !== null,
+				);
+				if (coverageNotices.length > 0) {
+					onProblem?.({status: 'incomplete', reasons: coverageNotices});
 				}
 
 				const showUsageFooter = getShowUsageFooter();
@@ -728,7 +762,9 @@ export function createReviewCommand(
 					{key: generateKey('review')},
 					infoMsg(scopeNotice, 'review-scope'),
 					...baseNotices.map(notice => warningMsg(notice, 'review-base')),
-					coverageNotice ? warningMsg(coverageNotice, 'review-coverage') : null,
+					...coverageNotices.map(notice =>
+						warningMsg(notice, 'review-coverage'),
+					),
 					reply?.reasoning
 						? React.createElement(AssistantReasoning, {
 								key: generateKey('review-reasoning'),
@@ -749,6 +785,86 @@ export function createReviewCommand(
 			}
 		},
 	};
+}
+
+/**
+ * `/review`. There is no `progressLabel`: the dispatcher's spinner would
+ * take the live slot from a review that is already running, so each form
+ * mounts its own progress view once it knows no other review owns the slot.
+ */
+export function createReviewCommand(
+	dependencies: ReviewDependencies = defaultDependencies,
+	grounded: GroundedReviewDependencies = {},
+): StatefulCommand {
+	const view = createReviewView(dependencies);
+	const showView = async (context: Parameters<StatefulCommand['run']>[0]) => ({
+		show: await view.handler(
+			context.rawArgs,
+			context.messages,
+			context.handlerMetadata(),
+		),
+	});
+	return {
+		name: 'review',
+		description: REVIEW_DESCRIPTION,
+		echoInvocation: true,
+		run: async context => {
+			const form = context.rawArgs[0]?.toLowerCase();
+			if (form === 'activity') return showView(context);
+			return runExclusiveReview(context, async () => {
+				if (form === 'deep') {
+					return runGroundedReviewCommand(
+						context,
+						'Deep',
+						context.rawArgs.slice(1).join(' '),
+						grounded,
+					);
+				}
+				if (form !== 'quick') {
+					return runGroundedReviewCommand(
+						context,
+						'Grounded',
+						context.argText.trim(),
+						grounded,
+					);
+				}
+				context.setLiveComponent(
+					React.createElement(CommandProgress, {
+						key: generateKey('review-progress'),
+						label: 'Reviewing code',
+					}),
+				);
+				try {
+					return await showView(context);
+				} finally {
+					context.setLiveComponent(null);
+				}
+			});
+		},
+	};
+}
+
+function renderReviewActivity(
+	args: string[],
+	messages: Message[],
+): React.ReactElement {
+	if (args.length > 0) {
+		return errorMsg('Usage: /review activity', 'review');
+	}
+	const review = findLatestPersistedReview(messages);
+	if (!review) {
+		return warningMsg(
+			'No review activity in this session yet. Run /review first.',
+			'review',
+		);
+	}
+	return React.createElement(ReviewActivity, {
+		key: generateKey('review-activity-details'),
+		summary: review.activity,
+		title: `${review.tier} review`,
+		outcome: review.status,
+		expanded: true,
+	});
 }
 
 function getTruncationNotice(totalLines: number): string {
