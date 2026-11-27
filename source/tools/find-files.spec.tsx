@@ -956,3 +956,36 @@ test.serial(
 		}
 	},
 );
+
+test.serial('find_files handles negative and fractional maxResults safely', async t => {
+	const testDir = mkdtempSync(join(tmpdir(), 'nanocoder-find-files-limit-'));
+	try {
+		mkdirSync(join(testDir, 'src'), {recursive: true});
+		writeFileSync(join(testDir, 'src', 'a.ts'), 'export const a = 1;\n');
+		writeFileSync(join(testDir, 'src', 'b.ts'), 'export const b = 2;\n');
+		writeFileSync(join(testDir, 'src', 'c.ts'), 'export const c = 3;\n');
+
+		const originalCwd = process.cwd();
+		process.chdir(testDir);
+		try {
+			// biome-ignore lint/suspicious/noExplicitAny: Test calling tool execute directly
+			const execute = (findFilesTool.tool as any).execute;
+			const negResult = await execute(
+				{pattern: 'src/**/*.ts', maxResults: -1},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(negResult.includes('Found 3 matches'));
+
+			const fracResult = await execute(
+				{pattern: 'src/**/*.ts', maxResults: 2.5},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(fracResult.includes('(showing first 2)'));
+			t.false(fracResult.includes('2.5'));
+		} finally {
+			process.chdir(originalCwd);
+		}
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});

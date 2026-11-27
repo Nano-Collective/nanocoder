@@ -18,7 +18,10 @@ import {recordVisibilityReceipt} from '@/tools/runtime/read-tracker';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {searchProjectContents} from '@/utils/fs/file-search';
+import {
+	normalizeMaxResults,
+	searchProjectContents,
+} from '@/utils/fs/file-search';
 import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
@@ -43,8 +46,9 @@ const executeSearchFileContents = async (
 	}
 
 	const cwd = getSessionCwd();
-	const maxResults = Math.min(
-		args.maxResults || DEFAULT_SEARCH_RESULTS,
+	const maxResults = normalizeMaxResults(
+		args.maxResults,
+		DEFAULT_SEARCH_RESULTS,
 		MAX_SEARCH_RESULTS,
 	);
 	const caseSensitive = args.caseSensitive || false;
@@ -182,6 +186,7 @@ const searchFileContentsCoreTool = tool({
 			},
 			maxResults: {
 				type: 'number',
+				minimum: 1,
 				description:
 					'Maximum number of matches to return (default: 30, max: 100)',
 			},
