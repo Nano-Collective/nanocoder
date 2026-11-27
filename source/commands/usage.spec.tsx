@@ -673,6 +673,114 @@ test('a session of only unpriced hosted calls shows "—", not $0.00 (#2390)', a
 	t.true(Number.isNaN(cost.cumulativeSession));
 });
 
+// Review of #2442: the totals come from the history, whatever the active model is.
+const localCall = (provider: string): ApiCallRecord => ({
+	provider,
+	model: 'llama3',
+	inputTokens: 1000,
+	outputTokens: 100,
+	baseURL: 'http://localhost:11434/v1',
+	timestamp: Date.now(),
+});
+async function costWith(
+	apiCallHistory: ApiCallRecord[],
+	active: {model?: string; baseURL?: string} = {},
+) {
+	const client = active.baseURL
+		? {getProviderConfig: () => ({config: {baseURL: active.baseURL}})}
+		: undefined;
+	const element = (await usageCommand.handler([], createMessages(), {
+		...createMockMetadata('openai', active.model ?? 'gpt-4o'),
+		...(client ? {client: client as never} : {}),
+		apiCallHistory,
+	})) as React.ReactElement<{
+		cost: {
+			cumulativeSession: number;
+			perProvider?: Record<string, number>;
+			sessionPartial?: boolean;
+			partialProviders?: string[];
+		};
+	}>;
+	return {cost: element.props.cost, frame: renderWithTheme(element).lastFrame()!};
+}
+const pricedElsewhere: ApiCallRecord = {...pricedCall, provider: 'azure'};
+
+test('switching to an unpriced model keeps the session total and breakdown (#2442)', async t => {
+	const before = await costWith([pricedCall, pricedElsewhere]);
+	const after = await costWith([pricedCall, pricedElsewhere], {
+		model: 'my-finetune-xyz-not-on-models-dev',
+	});
+	t.true(after.cost.cumulativeSession > 0);
+	t.is(after.cost.cumulativeSession, before.cost.cumulativeSession);
+	t.deepEqual({...after.cost.perProvider}, {...before.cost.perProvider});
+	t.regex(after.frame, /Cumulative Session:.*\$/);
+	t.regex(after.frame, /azure:.*\$/);
+});
+
+test('switching to a local model keeps the session total and breakdown (#2442)', async t => {
+	const before = await costWith([pricedCall, pricedElsewhere]);
+	const after = await costWith([pricedCall, pricedElsewhere], {
+		model: 'llama3',
+		baseURL: 'http://localhost:11434/v1',
+	});
+	t.true(after.cost.cumulativeSession > 0);
+	t.is(after.cost.cumulativeSession, before.cost.cumulativeSession);
+	t.deepEqual({...after.cost.perProvider}, {...before.cost.perProvider});
+	t.regex(after.frame, /openai:.*\$/);
+});
+
+test('a free local call beside an unpriced hosted call keeps the total at "—" (#2442)', async t => {
+	const {cost, frame} = await costWith([
+		localCall('ollama'),
+		unpricedCall('my-proxy'),
+	]);
+	t.true(Number.isNaN(cost.cumulativeSession));
+	t.is(cost.perProvider?.ollama, 0);
+	t.true(Number.isNaN(cost.perProvider?.['my-proxy']));
+	t.regex(frame, /Cumulative Session:.*—/);
+});
+
+test('a session of only local calls still costs $0.00 (#2442)', async t => {
+	const {cost, frame} = await costWith([localCall('ollama'), localCall('ollama')]);
+	t.is(cost.cumulativeSession, 0);
+	t.false(cost.sessionPartial);
+	t.regex(frame, /Cumulative Session:.*\$0\.0+(?!\d)/);
+	t.notRegex(frame, /excludes unpriced calls/);
+});
+
+test('a total that leaves out unpriced calls says so (#2442)', async t => {
+	const {cost, frame} = await costWith([
+		pricedCall,
+		unpricedCall('openai'),
+		unpricedCall('my-proxy'),
+	]);
+	t.true(cost.sessionPartial);
+	t.deepEqual(cost.partialProviders, ['openai']);
+	t.regex(frame, /Cumulative Session:.*\$[\d.]+ \(excludes unpriced calls\)/);
+	t.regex(frame, /openai:.*\$[\d.]+ \(excludes unpriced calls\)/);
+	t.regex(frame, /my-proxy:.*—/);
+	t.notRegex(frame, /my-proxy:.*excludes/);
+});
+
+test('a fully priced session has no partial note (#2442)', async t => {
+	const {cost, frame} = await costWith([pricedCall, pricedElsewhere]);
+	t.false(cost.sessionPartial);
+	t.deepEqual(cost.partialProviders, []);
+	t.notRegex(frame, /excludes unpriced calls/);
+});
+
+test('providers named __proto__ and constructor stay in the breakdown (#2442)', async t => {
+	const {cost} = await costWith([
+		{...pricedCall, provider: '__proto__'},
+		{...pricedCall, provider: 'constructor'},
+	]);
+	t.deepEqual(Object.keys(cost.perProvider ?? {}).sort(), [
+		'__proto__',
+		'constructor',
+	]);
+	t.true((cost.perProvider?.['__proto__'] ?? 0) > 0);
+});
+
 test('usage command does not price earlier calls made on a local server', async t => {
 	const messages = createMessages();
 	const metadata = {

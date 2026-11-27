@@ -11,9 +11,11 @@ import type {CostBreakdown, TokenBreakdown} from '@/types/usage.js';
 import {formatTokenCount, getUsageStatusColor} from '@/usage/calculator.js';
 import {ProgressBar} from './progress-bar.js';
 
-function formatCost(cost: number): string {
+function formatCost(cost: number, partial = false): string {
 	if (!Number.isFinite(cost)) return '—';
-	return cost >= 1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
+	const amount = cost >= 1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
+	// The total leaves out calls whose model has no known price
+	return partial ? `${amount} (excludes unpriced calls)` : amount;
 }
 
 interface UsageDisplayProps {
@@ -308,7 +310,7 @@ export function UsageDisplay({
 						<Text color={colors.secondary}>
 							Cumulative Session:{' '}
 							<Text color={colors.text}>
-								{formatCost(cost.cumulativeSession)}
+								{formatCost(cost.cumulativeSession, cost.sessionPartial)}
 							</Text>
 						</Text>
 					</Box>
@@ -320,7 +322,10 @@ export function UsageDisplay({
 							{Object.entries(cost.perProvider).map(([prov, val]) => (
 								<Box key={prov} marginLeft={2}>
 									<Text color={colors.secondary}>
-										{prov}: <Text color={colors.text}>{formatCost(val)}</Text>
+										{prov}:{' '}
+										<Text color={colors.text}>
+											{formatCost(val, cost.partialProviders?.includes(prov))}
+										</Text>
 									</Text>
 								</Box>
 							))}

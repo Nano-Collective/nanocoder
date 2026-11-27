@@ -21,7 +21,12 @@ import {createTokenizer} from '@/tokenization/index';
 import type {Command} from '@/types/commands';
 import type {TuneConfig} from '@/types/config';
 import {getTuneToolMode} from '@/types/config';
-import type {ApiUsageSnapshot, DevelopmentMode, Message} from '@/types/core';
+import type {
+	ApiCallRecord,
+	ApiUsageSnapshot,
+	DevelopmentMode,
+	Message,
+} from '@/types/core';
 import type {CostBreakdown} from '@/types/usage';
 import {
 	calculateTokenBreakdown,
@@ -31,6 +36,82 @@ import {calculateUsageCost} from '@/usage/response-usage';
 import {generateKey} from '@/utils/key-generator';
 import {estimateTokens} from '@/utils/token-calculator';
 import {isLocalURL} from '@/utils/url-utils';
+
+interface CostTally {
+	known: number; // Sum of the calls whose cost is known
+	pricedHosted: boolean; // A hosted call had a price
+	unpriced: boolean; // A call had no known price
+}
+
+// Unknown when an unpriced call has nothing but free local calls beside it:
+// $0.00 would say the hosted call was free. Partial when it leaves calls out.
+function settle(tally: CostTally): {value: number; partial: boolean} {
+	if (tally.unpriced && !tally.pricedHosted)
+		return {value: NaN, partial: false};
+	return {value: tally.known, partial: tally.unpriced};
+}
+
+/** Session and per-provider spend, priced call by call from the history. */
+async function historyCost(
+	history: ApiCallRecord[],
+): Promise<Omit<CostBreakdown, 'currentContext'>> {
+	if (history.length === 0) return {cumulativeSession: NaN};
+
+	// Calls made on a local server are free, whatever models.dev lists
+	// under the same id.
+	const isLocalCall = (r: ApiCallRecord) =>
+		Boolean(r.baseURL && isLocalURL(r.baseURL));
+	const hostedModels = [
+		...new Set(history.filter(r => !isLocalCall(r)).map(r => r.model)),
+	];
+	const pricing = new Map(
+		await Promise.all(
+			hostedModels.map(async m => [m, await getModelPricing(m)] as const),
+		),
+	);
+
+	const session: CostTally = {known: 0, pricedHosted: false, unpriced: false};
+	const byProvider = new Map<string, CostTally>();
+	for (const record of history) {
+		const local = isLocalCall(record);
+		const recordPricing = pricing.get(record.model);
+		const callCost = local
+			? 0
+			: recordPricing
+				? (calculateUsageCost(record, recordPricing) ?? 0)
+				: NaN;
+		const provider = byProvider.get(record.provider) ?? {
+			known: 0,
+			pricedHosted: false,
+			unpriced: false,
+		};
+		byProvider.set(record.provider, provider);
+		for (const tally of [session, provider]) {
+			if (!Number.isFinite(callCost)) {
+				tally.unpriced = true;
+				continue;
+			}
+			tally.known += callCost;
+			if (!local) tally.pricedHosted = true;
+		}
+	}
+
+	// No prototype, so a provider named __proto__ or constructor is kept.
+	const perProvider: Record<string, number> = Object.create(null);
+	const partialProviders: string[] = [];
+	for (const [name, tally] of byProvider) {
+		const {value, partial} = settle(tally);
+		perProvider[name] = value;
+		if (partial) partialProviders.push(name);
+	}
+	const total = settle(session);
+	return {
+		cumulativeSession: total.value,
+		sessionPartial: total.partial,
+		perProvider: byProvider.size > 1 ? perProvider : undefined,
+		partialProviders,
+	};
+}
 
 export const usageCommand: Command = {
 	name: 'usage',
@@ -195,6 +276,7 @@ export const usageCommand: Command = {
 			const baseURL = client?.getProviderConfig()?.config.baseURL;
 			const pricing =
 				baseURL && isLocalURL(baseURL) ? null : await getModelPricing(model);
+			let currentContext = NaN;
 			if (pricing) {
 				// ---- Current-context cost (same as Phase 2) ----
 				const snapshot = metadata.lastApiUsage;
@@ -204,62 +286,15 @@ export const usageCommand: Command = {
 				const reportedContextCost = isSnapshotFresh
 					? calculateUsageCost(snapshot, pricing)
 					: undefined;
-				const currentContextCost =
+				currentContext =
 					reportedContextCost ?? (pricing.input * breakdown.total) / 1_000_000;
-
-				// ---- Cumulative session + per-provider (from history) ----
-				const history = metadata.apiCallHistory ?? [];
-				let cumulativeSession = 0;
-				let anyCallPriced = false;
-				const perProvider: Record<string, number> = {};
-				const pricingCache = new Map<string, typeof pricing>();
-
-				// Calls made earlier on a local server stay free while a hosted
-				// provider is active.
-				const isLocalCall = (r: (typeof history)[number]) =>
-					Boolean(r.baseURL && isLocalURL(r.baseURL));
-				const uniqueModels = [
-					...new Set(history.filter(r => !isLocalCall(r)).map(r => r.model)),
-				];
-				const pricings = await Promise.all(
-					uniqueModels.map(async model => {
-						const p = await getModelPricing(model);
-						return [model, p ?? {input: NaN, output: NaN}] as const;
-					}),
-				);
-				for (const [model, p] of pricings) pricingCache.set(model, p);
-
-				for (const record of history) {
-					const recordPricing = pricingCache.get(record.model) ?? {
-						input: NaN,
-						output: NaN,
-					};
-
-					const callCost = isLocalCall(record)
-						? 0
-						: (calculateUsageCost(record, recordPricing) ?? 0);
-
-					// An unpriced call costs NaN. It must not turn the priced
-					// calls' totals into NaN: it only leaves its provider at
-					// NaN ("—") when none of that provider's calls is priced.
-					if (!Number.isFinite(callCost)) {
-						perProvider[record.provider] ??= NaN;
-						continue;
-					}
-					anyCallPriced = true;
-					cumulativeSession += callCost;
-					const providerSoFar = perProvider[record.provider];
-					perProvider[record.provider] =
-						(Number.isFinite(providerSoFar) ? providerSoFar : 0) + callCost;
-				}
-
-				cost = {
-					currentContext: currentContextCost,
-					cumulativeSession: anyCallPriced ? cumulativeSession : NaN,
-					perProvider:
-						Object.keys(perProvider).length > 1 ? perProvider : undefined,
-				};
 			}
+			// The history is priced call by call, so it does not depend on
+			// whether the active model has a price.
+			cost = {
+				currentContext,
+				...(await historyCost(metadata.apiCallHistory ?? [])),
+			};
 		} catch {
 			// Best-effort: already initialized to NaN — display will show "—"
 		}

@@ -32,4 +32,6 @@ export interface CostBreakdown {
 	currentContext: number; // Cost of current context window
 	cumulativeSession: number; // Session total spend
 	perProvider?: Record<string, number>; // Per-provider subtotals
+	sessionPartial?: boolean; // cumulativeSession leaves out calls with no known price
+	partialProviders?: string[]; // Providers whose subtotal leaves out such calls
 }
