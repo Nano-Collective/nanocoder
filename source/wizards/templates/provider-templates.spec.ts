@@ -569,6 +569,44 @@ test('runcrate template: uses default provider name and model default', t => {
 	t.is(config.name, 'Runcrate');
 });
 
+test('llmtr template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'llmtr');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'LLMTR',
+		apiKey: 'test-key',
+		model: 'qwen/qwen3.8-27b-free, minimax/minimax-m3.1-flash',
+	});
+
+	t.is(config.name, 'LLMTR');
+	t.is(config.baseUrl, 'https://llmtr.com/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'qwen/qwen3.8-27b-free',
+		'minimax/minimax-m3.1-flash',
+	]);
+});
+
+test('llmtr template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'llmtr');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'qwen/qwen3.8-27b-free');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.is(apiKeyField?.prompt, 'API Key (from https://llmtr.com/dashboard/keys)');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'qwen/qwen3.8-27b-free',
+	});
+
+	t.is(config.name, 'LLMTR');
+});
+
 // ============================================================================
 // Tests for template ID vs sdkProvider collision prevention
 // Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
