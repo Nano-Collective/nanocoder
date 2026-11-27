@@ -193,6 +193,19 @@ export class ToolManager {
 	 * a reason instead of being attempted against a dead transport.
 	 */
 	private mcpUnavailableServers = new Set<string>();
+	/**
+	 * Last known owner of every MCP tool this manager registered or
+	 * catalogued, as the client reported it.
+	 *
+	 * The client's own mapping is rebuilt from the tools its servers
+	 * currently offer, and marking a server unhealthy empties that
+	 * server's tool list immediately after announcing the change. Tools now
+	 * stay registered through an outage (#1574), so from that moment the
+	 * live mapping no longer knows who owns them: every retained tool would
+	 * look like a built-in, and the mark that makes a call to it fail fast
+	 * would never be found. This map is what survives the clear.
+	 */
+	private mcpToolOwners: ReturnType<MCPClient['getToolMapping']> = new Map();
 	// Names the MCP client currently holds in the registry. The registry is a
 	// plain name-keyed map, so an MCP tool named like a built-in would replace
 	// it, and removing MCP tools by name would then delete the built-in. Only
@@ -265,6 +278,7 @@ export class ToolManager {
 
 		this.registry.register({...entry, source: 'mcp'});
 		this.mcpToolNames.add(toolName);
+		this.rememberMcpOwners([toolName]);
 		this.mcpCatalog.markLoaded(toolName);
 		return true;
 	}
@@ -360,6 +374,15 @@ export class ToolManager {
 				if (skipped.has(tool.name)) continue;
 				this.mcpCatalog.add(tool.serverName, tool, !useDiscovery);
 			}
+			// Catalogued but unregistered tools need an owner as much as
+			// registered ones: load_tool_schema refuses to hydrate one whose
+			// server is down, and that check reads the owner.
+			this.rememberMcpOwners(
+				discoveredTools
+					.filter(tool => !skipped.has(tool.name))
+					.map(tool => tool.name),
+				mapping,
+			);
 
 			if (useDiscovery) {
 				this.registry.registerToolExport(createLoadToolSchemaTool(this));
@@ -421,9 +444,11 @@ export class ToolManager {
 	 * are registered when every schema is registered, or listed in the catalog
 	 * as unloaded under discovery, the same as at startup.
 	 *
-	 * A tool already registered is deliberately left alone rather than
-	 * re-registered: a fresh entry would mean a fresh schema object, and the
-	 * prefix tracker caches each tool's digest on schema identity.
+	 * A tool that was already registered keeps its registration and its
+	 * position, but its entry is refreshed from what the server now reports
+	 * (see `refreshRecoveredTool`) so a changed read-only hint or schema
+	 * cannot be missed. An unchanged schema object is carried over, so the
+	 * prefix tracker's digest cache, which keys on schema identity, survives.
 	 *
 	 * A tool the server has *dropped* keeps its registration. Removing it would
 	 * cost the prefix exactly what keeping the server's tools through the
@@ -439,6 +464,12 @@ export class ToolManager {
 		const entries = client
 			.getToolEntries(serverName)
 			.filter(entry => !this.isTakenByNonMCPTool(entry.name));
+		// The client re-lists a recovered server's tools before it announces the
+		// recovery, so its mapping is accurate again at this point. Record the
+		// owners first: a tool gained during the outage has none yet, and one
+		// retained through it is still pointing at the pre-outage record.
+		this.rememberMcpOwners(entries.map(entry => entry.name));
+
 		const gained = entries.filter(entry => !this.holdsMCPTool(entry.name));
 		const toRegister = this.mcpDiscovery ? [] : gained;
 		const registering = new Set(toRegister.map(entry => entry.name));
@@ -448,14 +479,64 @@ export class ToolManager {
 				? client.getServerTools(serverName)
 				: catalogToolsFromEntries(entries, client.getToolMapping());
 		const offered = new Set(entries.map(entry => entry.name));
+		const described = new Map(tools.map(tool => [tool.name, tool]));
+
+		// Tools that held their place through the outage keep it, but the
+		// server gets the last word on what they now do. This runs before the
+		// catalog is updated below, and has to: the stored entry is what says
+		// which schema was in the request before the outage.
+		for (const entry of entries) {
+			if (!this.mcpToolNames.has(entry.name)) continue;
+			this.refreshRecoveredTool(entry, described.get(entry.name));
+		}
+
 		for (const tool of tools) {
 			if (!offered.has(tool.name)) continue;
-			// Already listed: leave the entry as it is, loaded flag included,
-			// so the prompt's catalog section does not change either.
-			if (this.mcpCatalog.has(tool.name)) continue;
-			this.mcpCatalog.add(serverName, tool, registering.has(tool.name));
+			// An entry already in the catalog keeps whether it is loaded, and is
+			// rewritten only if the server changed something; a new one is loaded
+			// exactly when it is being registered.
+			this.mcpCatalog.refresh(
+				serverName,
+				tool,
+				this.mcpCatalog.has(tool.name) ? undefined : registering.has(tool.name),
+			);
 		}
 		this.registerMCPEntries(toRegister);
+	}
+
+	/**
+	 * Bring a tool that survived the outage up to date with what its server
+	 * now says about it, without giving up its place in the request.
+	 *
+	 * The entry is rebuilt from the recovered client's own tool entries, so
+	 * the handler closes over the live transport and the approval policy
+	 * follows the server's current read-only hint. Keeping the pre-outage
+	 * entry would leave a tool that has become mutating still annotated
+	 * read-only, and in auto-accept mode a read-only MCP tool runs without
+	 * asking — so a stale annotation is the difference between a prompt and
+	 * an unattended write.
+	 *
+	 * When the schema has not changed, which is the ordinary case, the entry
+	 * keeps the schema object the request has already been fingerprinted
+	 * against, so the prefix tracker's per-schema digest cache (keyed on
+	 * `inputSchema` identity) survives the recovery. A schema that genuinely
+	 * changed is passed on: the model is being offered different parameters,
+	 * and the prefix has to give.
+	 */
+	private refreshRecoveredTool(fresh: ToolEntry, tool?: MCPTool): void {
+		const current = this.registry.getEntry(fresh.name);
+		if (!current) return;
+		const stored = this.mcpCatalog.get(fresh.name);
+		const next: ToolEntry = {...fresh, source: 'mcp'};
+		const cachedSchema = current.tool.inputSchema;
+		if (
+			stored &&
+			cachedSchema !== undefined &&
+			JSON.stringify(stored.inputSchema) === JSON.stringify(tool?.inputSchema)
+		) {
+			next.tool = {...next.tool, inputSchema: cachedSchema};
+		}
+		this.registry.register(next);
 	}
 
 	/**
@@ -481,6 +562,7 @@ export class ToolManager {
 			// them into the same order every session (#1574).
 			this.registry.register({...entry, source: 'mcp'});
 			this.mcpToolNames.add(entry.name);
+			this.rememberMcpOwners([entry.name]);
 		}
 		return skipped;
 	}
@@ -518,9 +600,32 @@ export class ToolManager {
 		const mcp =
 			this.mcpToolNames.has(name) ||
 			(!this.registry.hasTool(name) && this.mcpCatalog.has(name));
-		return mcp
-			? (this.mcpClient ?? this.parent?.mcpClient)?.getToolMapping().get(name)
-			: undefined;
+		if (!mcp) return undefined;
+		const live = (this.mcpClient ?? this.parent?.mcpClient)
+			?.getToolMapping()
+			.get(name);
+		// An unhealthy server's tools are gone from the live mapping while its
+		// tools stay registered (#1574), so the last owner recorded for this
+		// tool is what identifies it until the server is back.
+		return live ?? this.mcpToolOwners.get(name);
+	}
+
+	/**
+	 * Record who owns each of these tools, from a mapping that is accurate
+	 * right now. Called at startup, on hydration and on recovery — each a
+	 * point where the client has just listed the tools in question.
+	 */
+	private rememberMcpOwners(
+		names: Iterable<string>,
+		mapping?: ReturnType<MCPClient['getToolMapping']>,
+	): void {
+		const owners =
+			mapping ?? (this.mcpClient ?? this.parent?.mcpClient)?.getToolMapping();
+		if (!owners) return;
+		for (const name of names) {
+			const owned = owners.get(name);
+			if (owned) this.mcpToolOwners.set(name, owned);
+		}
 	}
 
 	protected async createMCPClient(): Promise<MCPClient> {
@@ -862,6 +967,7 @@ export class ToolManager {
 		this.mcpCatalog.clear();
 		this.mcpDiscovery = false;
 		this.mcpUnavailableServers.clear();
+		this.mcpToolOwners.clear();
 		this.registry.unregister('load_tool_schema');
 		if (this.mcpClient) {
 			this.unregisterMCPTools([...this.mcpToolNames]);

@@ -104,6 +104,96 @@ test('sanitizeCatalogText collapses vertical tabs and unicode line breaks', (t) 
 	t.is(sanitized, 'Line 1 Line 2 Line 3');
 });
 
+test('MCPToolCatalog refresh leaves an unchanged entry alone and keeps it loaded', (t) => {
+	const catalog = new MCPToolCatalog();
+	const tool = {
+		name: 'query_db',
+		description: 'Query the database',
+		serverName: 'db',
+		readOnly: true,
+		inputSchema: {type: 'object', properties: {}},
+	};
+	catalog.add('db', tool, true);
+	const before = catalog.get('query_db');
+
+	// A server reconnecting after an outage re-lists the same tool. The entry
+	// must not be rewritten: an unloaded one renders into the system prompt,
+	// and churning it would cost the cached prefix for nothing (#1574).
+	t.false(catalog.refresh('db', tool));
+	t.is(catalog.get('query_db'), before);
+	t.true(catalog.isLoaded('query_db'), 'and it is still loaded');
+});
+
+test('MCPToolCatalog refresh takes on a changed annotation and schema, keeping loaded', (t) => {
+	const catalog = new MCPToolCatalog();
+	catalog.add(
+		'db',
+		{
+			name: 'query_db',
+			description: 'Query the database',
+			serverName: 'db',
+			readOnly: true,
+			inputSchema: {type: 'object', properties: {}},
+		},
+		true,
+	);
+
+	// The same server comes back having made the tool mutating, with a
+	// different description and schema.
+	t.true(
+		catalog.refresh('db', {
+			name: 'query_db',
+			description: 'Run arbitrary SQL',
+			serverName: 'db',
+			readOnly: false,
+			inputSchema: {type: 'object', properties: {sql: {type: 'string'}}},
+		}),
+	);
+	const entry = catalog.get('query_db');
+	t.is(entry?.description, 'Run arbitrary SQL');
+	t.false(entry?.readOnly);
+	t.deepEqual(entry?.inputSchema, {
+		type: 'object',
+		properties: {sql: {type: 'string'}},
+	});
+	t.true(catalog.isLoaded('query_db'), 'loading is not undone by a refresh');
+});
+
+test('MCPToolCatalog refresh adds a tool the layer does not have yet', (t) => {
+	const catalog = new MCPToolCatalog();
+	t.true(
+		catalog.refresh(
+			'db',
+			{name: 'new_tool', description: 'Gained on reconnect', serverName: 'db'},
+			true,
+		),
+	);
+	t.true(catalog.isLoaded('new_tool'));
+	t.is(catalog.get('new_tool')?.serverName, 'db');
+});
+
+test('MCPToolCatalog refresh shadows a parent entry without mutating it', (t) => {
+	const parent = new MCPToolCatalog();
+	parent.add('db', {
+		name: 'query_db',
+		description: 'Query the database',
+		serverName: 'db',
+		readOnly: true,
+	});
+	const session = new MCPToolCatalog(parent);
+
+	t.true(
+		session.refresh('db', {
+			name: 'query_db',
+			description: 'Query the database',
+			serverName: 'db',
+			readOnly: false,
+		}),
+	);
+	t.false(session.get('query_db')?.readOnly);
+	t.true(parent.get('query_db')?.readOnly, 'parent entry is untouched');
+});
+
 test('MCPToolCatalog layering: session catalog clear does not wipe parent catalog', (t) => {
 	const parent = new MCPToolCatalog();
 	parent.add('base_server', {
