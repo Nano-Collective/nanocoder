@@ -42,6 +42,8 @@ export interface PlainInitOptions {
 	cliModel?: string;
 	/** The run's mode, so its subagents are offered what the main agent is. */
 	developmentMode?: DevelopmentMode;
+	/** Avoid changing the user's last-provider/model preference for a scoped run. */
+	persistSelection?: boolean;
 }
 
 /**
@@ -123,7 +125,9 @@ export async function initializePlain(
 		}
 	}
 
-	updateLastUsed(actualProvider, finalModel);
+	if (options.persistSelection !== false) {
+		updateLastUsed(actualProvider, finalModel);
+	}
 	setAutoCommitClient(client);
 
 	const subagentExecutor = new SubagentExecutor(

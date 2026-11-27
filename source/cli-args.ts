@@ -1,3 +1,4 @@
+import {type CliMode, VALID_MODES} from './app/types.js';
 import {
 	RUN_FLAGS_STANDALONE,
 	RUN_FLAGS_WITH_VALUES,
@@ -17,6 +18,7 @@ export const COMMANDS = [
 	'config',
 	'trust',
 	'storage',
+	'mcp',
 	'completion',
 ] as const;
 
@@ -71,6 +73,87 @@ const INIT_FLAGS: FlagSet = {
 	withValues: INIT_FLAGS_WITH_VALUES,
 	withoutValues: INIT_FLAGS_WITHOUT_VALUES,
 };
+
+const MCP_FLAGS: FlagSet = {
+	withValues: ['--provider', '--model', '--mode'],
+	withoutValues: ['--trust-directory'],
+};
+
+export const MCP_SERVER_CLI_USAGE = `Usage: nanocoder mcp serve [options]
+
+Start Nanocoder as an MCP server over stdio.
+
+Options:
+  --provider <name>  Use a configured AI provider
+  --model <name>     Use a model available to the provider
+  --mode <mode>      Set the maximum tool permission mode (default: plan)
+  --trust-directory  Skip the directory trust check for this run only`;
+
+export interface McpServeCliOptions {
+	provider?: string;
+	model?: string;
+	mode?: CliMode;
+	trustDirectory: boolean;
+}
+
+/** Parse the small option set accepted by `nanocoder mcp serve`. */
+export function parseMcpServeArgs(
+	args: string[],
+): {options: McpServeCliOptions} | {error: string} {
+	const options: McpServeCliOptions = {trustDirectory: false};
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === '--trust-directory') {
+			options.trustDirectory = true;
+			continue;
+		}
+
+		const flag = MCP_FLAGS.withValues.find(
+			candidate => arg === candidate || arg.startsWith(`${candidate}=`),
+		);
+		if (!flag) {
+			if (arg.startsWith('-')) {
+				return {
+					error: unknownOptionError(arg, [
+						...MCP_FLAGS.withValues,
+						...MCP_FLAGS.withoutValues,
+					]),
+				};
+			}
+			return {error: MCP_SERVER_CLI_USAGE};
+		}
+
+		const hasInlineValue = arg.startsWith(`${flag}=`);
+		const value = hasInlineValue ? arg.slice(flag.length + 1) : args[i + 1];
+		if (!value || value.startsWith('-')) {
+			return {error: `${flag} requires a value.`};
+		}
+		if (!hasInlineValue) i++;
+
+		if (flag === '--provider') {
+			if (!/^[a-zA-Z0-9 _./():+@-]+$/.test(value) || !value.trim()) {
+				return {
+					error: `Invalid --provider value: "${value}". Provider name may contain letters, digits, spaces and _ . / ( ) : + @ - only.`,
+				};
+			}
+			options.provider = value.trim();
+		} else if (flag === '--model') {
+			if (!/^[a-zA-Z0-9_/.:@+-]+$/.test(value)) {
+				return {
+					error: `Invalid --model value: "${value}". Model name must contain only alphanumeric characters and - _ . / : @ +`,
+				};
+			}
+			options.model = value;
+		} else if ((VALID_MODES as readonly string[]).includes(value)) {
+			options.mode = value as CliMode;
+		} else {
+			return {
+				error: `Invalid --mode value: "${value}". Must be one of: ${VALID_MODES.join(', ')}`,
+			};
+		}
+	}
+	return {options};
+}
 
 function editDistance(left: string, right: string): number {
 	const row = Array.from({length: right.length + 1}, (_, index) => index);
@@ -290,6 +373,20 @@ export function validateCliArgs(args: string[]): string | undefined {
 		// parser uses stops `review --bogus main` from being reported as an
 		// extra review target.
 		return scanArgs(args, 1, args.length, REVIEW_FLAGS).error;
+	}
+
+	if (args[0] === 'mcp') {
+		if (!args[1] || args[1] === '--help' || args[1] === '-h') {
+			return undefined;
+		}
+		if (args[1] !== 'serve') {
+			const match = findSuggestion(args[1], ['serve']);
+			return match
+				? `Unknown mcp subcommand "${args[1]}". Did you mean "${match}"?`
+				: MCP_SERVER_CLI_USAGE;
+		}
+		const result = parseMcpServeArgs(args.slice(2));
+		return 'error' in result ? result.error : undefined;
 	}
 
 	if (args[0] === 'worktree') {

@@ -64,6 +64,8 @@ export interface RunPlainConversationOptions {
 	 * `error` outcome instead of a success.
 	 */
 	jsonSchema?: JsonSchemaDocument;
+	/** Optional progress hook for frontends that own their own output protocol. */
+	onProgress?: (event: PlainConversationProgress) => void;
 	/**
 	 * Force a walkthrough after approved-plan work. Off by default: the plain
 	 * shell's artifact directory is ephemeral, so a forced walkthrough there
@@ -71,6 +73,10 @@ export interface RunPlainConversationOptions {
 	 */
 	enforceWalkthrough?: boolean;
 }
+
+export type PlainConversationProgress =
+	| {type: 'model'; step: number}
+	| {type: 'tool'; name: string};
 
 export interface PlainConversationUsage {
 	inputTokens: number;
@@ -304,6 +310,7 @@ async function runPlainConversationBody(
 	// consumers).
 	let finalTextBeforeTurn = '';
 	let reasoningBeforeTurn = '';
+	let modelStep = 0;
 
 	const result = await runTurnEngine<ApprovalRequired>({
 		client,
@@ -336,6 +343,8 @@ async function runPlainConversationBody(
 				};
 			},
 			beginModelCall: () => {
+				modelStep += 1;
+				options.onProgress?.({type: 'model', step: modelStep});
 				let streamedReasoning = '';
 				let reasoningPrinted = false;
 				let contentStarted = false;
@@ -537,6 +546,10 @@ async function runPlainConversationBody(
 
 				const toolResults: ToolResult[] = [];
 				for (const toolCall of toolsToExecute) {
+					options.onProgress?.({
+						type: 'tool',
+						name: toolCall.function.name,
+					});
 					if (!isJson) {
 						writeStatus(`tool: ${toolCall.function.name}`);
 					}

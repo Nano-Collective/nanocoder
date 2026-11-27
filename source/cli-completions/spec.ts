@@ -69,6 +69,11 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Inspect storage (read-only; --format json for scripts)',
 	},
 	{
+		name: 'mcp',
+		description: 'Run Nanocoder as an MCP server over stdio',
+		children: ['serve'],
+	},
+	{
 		name: 'daemon',
 		description: 'Manage the per-project skill daemon',
 		children: ['start', 'stop', 'status', 'logs', 'install', 'uninstall'],

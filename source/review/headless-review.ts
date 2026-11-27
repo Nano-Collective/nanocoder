@@ -56,6 +56,8 @@ export interface HeadlessReviewJson {
 export interface HeadlessReviewOptions {
 	/** Words after `review` (`deep`, `quick`, and the target). */
 	args: string[];
+	/** Explicit tier when a frontend already separates tier from its request. */
+	tier?: HeadlessReviewTier;
 	client: LLMClient;
 	provider: string;
 	model: string;
@@ -104,10 +106,14 @@ export function buildHeadlessReviewJson(
 	};
 }
 
-function failureJson(tier: HeadlessReviewTier, message: string): string {
+function failureJson(
+	tier: HeadlessReviewTier,
+	message: string,
+	status: 'failed' | 'cancelled' = 'failed',
+): string {
 	const body: HeadlessReviewJson = {
 		tier,
-		status: 'failed',
+		status,
 		message,
 		findings: [],
 		dropped: [],
@@ -182,15 +188,29 @@ export async function runHeadlessReview(
 	options: HeadlessReviewOptions,
 ): Promise<{exitCode: number; stdout: string}> {
 	const writeProgress = options.writeProgress ?? writeStatus;
-	const {tier, request} = splitHeadlessReviewArgs(options.args);
+	const {tier, request} = options.tier
+		? {tier: options.tier, request: options.args.join(' ').trim()}
+		: splitHeadlessReviewArgs(options.args);
 	const format = options.outputFormat ?? 'text';
 
 	if (tier === 'quick') {
+		if (options.signal?.aborted) {
+			const message = 'Review cancelled.';
+			return {
+				exitCode: 130,
+				stdout:
+					format === 'json' ? failureJson('quick', message, 'cancelled') : '',
+			};
+		}
 		writeProgress('Running the one-shot review');
 		let problem: QuickReviewProblem | undefined;
-		const command = createReviewView(options.quickDependencies, found => {
-			problem = found;
-		});
+		const command = createReviewView(
+			options.quickDependencies,
+			found => {
+				problem = found;
+			},
+			options.signal,
+		);
 		const rendered = await command.handler(
 			['quick', ...request.split(/\s+/).filter(Boolean)],
 			[],
@@ -203,6 +223,14 @@ export async function runHeadlessReview(
 				...(options.tune ? {tune: options.tune} : {}),
 			},
 		);
+		if (options.signal?.aborted) {
+			const message = 'Review cancelled.';
+			return {
+				exitCode: 130,
+				stdout:
+					format === 'json' ? failureJson('quick', message, 'cancelled') : '',
+			};
+		}
 		const {text, failed} = componentMessage(rendered);
 		if (failed || problem?.status === 'failed') {
 			writeProgress(text);
