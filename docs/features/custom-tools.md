@@ -186,7 +186,7 @@ When the tool runs:
 1. Parameters are validated against the declared schema. Validation errors (missing required params, wrong types, pattern mismatch, etc.) come back as `⚒ Missing required parameter: foo`-style messages without invoking the script.
 2. The body is rendered, then handed to the chosen shell (`-c` for bash/sh, `/d /v:off /s /c` with one outer command wrapper for cmd.exe). `shell: bash` / `shell: sh` still spawn `/bin/bash` or `/bin/sh` even on Windows, which typically fails with "Custom tool failed to start" if those binaries are missing.
 3. `cwd` and `env` are resolved (with `${VAR}` and `${VAR:-default}` substitution against `process.env`). See [Working directory](#working-directory) for the containment rules.
-4. The script runs with `timeout_ms` enforcement.
+4. The script runs with `timeout_ms` enforcement. A running custom tool can be cancelled like any other tool call: the whole process tree is stopped (with a forced kill if it ignores the first signal) and the call fails with "Custom tool was cancelled".
 5. The output always starts with `EXIT_CODE: N`, followed by the captured output. When the script wrote to stderr, the output is split into `STDERR:` and `STDOUT:` sections. Everything is truncated at the standard output limit.
 6. A non-zero exit is not treated as a tool failure: the model sees the exit code and output and decides what to do, the same as with `execute_bash`. Plenty of CLIs (`grep`, `git diff --exit-code`, test runners) exit non-zero in normal use. The tool call only fails outright when the shell can't start or the script hits `timeout_ms`.
 

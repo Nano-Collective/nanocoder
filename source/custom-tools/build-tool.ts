@@ -33,8 +33,10 @@ export function buildToolEntry(
 	const aiSdkTool = tool({
 		description: metadata.description,
 		inputSchema: jsonSchema(buildJsonSchema(metadata) as JSONSchema7),
-		execute: async (args, _options) => {
-			return handler(args as Record<string, unknown>);
+		execute: async (args, options) => {
+			return handler(args as Record<string, unknown>, {
+				abortSignal: options?.abortSignal,
+			});
 		},
 	});
 
