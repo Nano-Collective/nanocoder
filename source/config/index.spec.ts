@@ -2,8 +2,19 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,statSync,utim
 import {tmpdir} from 'os';
 import {join} from 'path';
 import test from 'ava';
-import {clearAppConfig, confDirMap, getClosestConfigFile, loadDefaultMode, reloadAppConfig} from './index';
+import {
+	clearAppConfig,
+	confDirMap,
+	getAppConfig,
+	getClosestConfigFile,
+	getSubagentMaxTurns,
+	loadDefaultMode,
+	reloadAppConfig,
+	resolveActiveProfile,
+} from './index';
+import {setMessageQueueSink} from '@/utils/message-queue-core';
 import {resolveTune} from './tune';
+import {updateConfigNestedValue} from './config-writer';
 
 type AppConfig = ReturnType<typeof import('./index.js').getAppConfig>;
 
@@ -21,6 +32,89 @@ test.after.always(() => {
 	// Clean up test directory
 	if (existsSync(testDir)) {
 		rmSync(testDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('LSP auto-discovery setting falls through config layers and defaults on', t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const originalLspEnv = process.env.NANOCODER_LSP;
+	const globalDir = join(testDir, 'lsp-auto-discovery-global');
+	const projectDir = join(testDir, 'lsp-auto-discovery-project');
+	const overrideProjectDir = join(testDir, 'lsp-auto-discovery-override');
+	mkdirSync(globalDir, {recursive: true});
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(overrideProjectDir, {recursive: true});
+	writeFileSync(
+		join(globalDir, 'agents.config.json'),
+		JSON.stringify({nanocoder: {lsp: {autoDiscover: false}}}),
+		'utf-8',
+	);
+
+	try {
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.chdir(projectDir);
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, false, 'uses the user-level value');
+
+		writeFileSync(
+			join(overrideProjectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {lsp: {autoDiscover: true}}}),
+			'utf-8',
+		);
+		process.chdir(overrideProjectDir);
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, true, 'project config takes precedence');
+
+		process.env.NANOCODER_LSP = 'off';
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, false, 'environment can disable discovery');
+
+		process.env.NANOCODER_CONFIG_DIR = join(testDir, 'missing-lsp-config');
+		delete process.env.NANOCODER_LSP;
+		const defaultProjectDir = join(testDir, 'lsp-auto-discovery-default');
+		mkdirSync(defaultProjectDir, {recursive: true});
+		process.chdir(defaultProjectDir);
+		reloadAppConfig();
+		t.is(getAppConfig().lsp?.autoDiscover, true, 'defaults to enabled');
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+		if (originalLspEnv === undefined) delete process.env.NANOCODER_LSP;
+		else process.env.NANOCODER_LSP = originalLspEnv;
+	}
+});
+
+test.serial('getAppConfig does not throw when the active profile disappears', t => {
+	const originalCwd = process.cwd();
+	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+	const projectDir = join(testDir, 'profile-removed-project');
+	const globalDir = join(testDir, 'profile-removed-global');
+	mkdirSync(projectDir, {recursive: true});
+	mkdirSync(globalDir, {recursive: true});
+	try {
+		process.env.NANOCODER_CONFIG_DIR = globalDir;
+		process.chdir(projectDir);
+		writeFileSync(
+			join(projectDir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {defaultProfile: 'gone'}}),
+			'utf-8',
+		);
+		// loadHierarchicalConfig used to call getActiveProfile on the unknown
+		// profile and throw: it must fall back to the files instead.
+		reloadAppConfig();
+		t.truthy(getAppConfig());
+		// Simulate the profile being removed mid-session: reloading must still
+		// not throw.
+		reloadAppConfig();
+		t.truthy(getAppConfig());
+	} finally {
+		clearAppConfig();
+		process.chdir(originalCwd);
+		if (originalConfigDir === undefined) delete process.env.NANOCODER_CONFIG_DIR;
+		else process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
 	}
 });
 
@@ -578,6 +672,48 @@ test.serial('headless maxTurns ignores invalid env var', async t => {
 	);
 });
 
+test.serial('subagent turn limit follows maxTurns when not configured', async t => {
+	await withHeadlessConfig(
+		'headless-subagent-default',
+		{nanocoder: {headless: {maxTurns: 300}}},
+		undefined,
+		() => {
+			t.is(getSubagentMaxTurns(), 300);
+		},
+	);
+	// NANOCODER_MAX_TURNS reaches subagents through maxTurns.
+	await withHeadlessConfig(
+		'headless-subagent-env',
+		{nanocoder: {}},
+		'42',
+		() => {
+			t.is(getSubagentMaxTurns(), 42);
+		},
+	);
+});
+
+test.serial('subagentMaxTurns loads from config, clamped to at least 1', async t => {
+	await withHeadlessConfig(
+		'headless-subagent-config',
+		{nanocoder: {headless: {subagentMaxTurns: 75}}},
+		'42',
+		(headless, fallback) => {
+			// The env var overrides maxTurns only, not an explicit subagent limit.
+			t.is(headless?.maxTurns, 42);
+			t.is(getSubagentMaxTurns(), 75);
+			t.not(fallback, 75);
+		},
+	);
+	await withHeadlessConfig(
+		'headless-subagent-clamp',
+		{nanocoder: {headless: {subagentMaxTurns: 0}}},
+		undefined,
+		() => {
+			t.is(getSubagentMaxTurns(), 1);
+		},
+	);
+});
+
 // Tests for agent-loop retry limits (nanocoder.retries)
 async function withRetriesConfig(
 	subdir: string,
@@ -765,9 +901,11 @@ async function withModeProvidersConfig(
 		const fullConfig = {
 			...configData,
 			nanocoder: {
-				...(configData.nanocoder as Record<string, unknown> || {}),
-				providers,
-			}
+				...((configData.nanocoder as Record<string, unknown>) || {}),
+				providers:
+					((configData.nanocoder as Record<string, unknown> | undefined)
+						?.providers as unknown[]) ?? providers,
+			},
 		};
 
 		writeFileSync(
@@ -901,6 +1039,109 @@ test.serial('modeProviders accepts model if provider has empty models list', asy
 			});
 		}
 	);
+});
+
+test.serial('modeProviders reports clear error and does not throw when provider has no models list', async t => {
+	const errors: string[] = [];
+	const {setMessageQueueSink} = await import('../utils/message-queue-core.js');
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			errors.push(message);
+		}
+	});
+
+	try {
+		await withModeProvidersConfig(
+			'no-models-list',
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'nomodels',
+							baseUrl: 'http://x',
+						},
+					],
+					modeProviders: {
+						plan: {
+							provider: 'nomodels',
+							model: 'm',
+						},
+					},
+				},
+			},
+			modeProviders => {
+				t.is(modeProviders, undefined);
+			},
+		);
+
+		t.true(
+			errors.some(
+				err =>
+					err.includes('Provider "nomodels" (modeProviders.plan) has no "models" list') &&
+					err.includes('Add one wherever the provider is defined.'),
+			),
+		);
+		t.false(errors.some(err => err.includes('TypeError')));
+	} finally {
+		setMessageQueueSink(null);
+	}
+});
+
+test.serial('modeProviders keeps valid entries when one provider has no models list', async t => {
+	const errors: string[] = [];
+	const {setMessageQueueSink} = await import('../utils/message-queue-core.js');
+	setMessageQueueSink((type, message) => {
+		if (type === 'error') {
+			errors.push(message);
+		}
+	});
+
+	try {
+		await withModeProvidersConfig(
+			'partial-no-models-list',
+			{
+				nanocoder: {
+					providers: [
+						{
+							name: 'nomodels',
+							baseUrl: 'http://x',
+						},
+						{
+							name: 'validprovider',
+							models: ['model1'],
+						},
+					],
+					modeProviders: {
+						plan: {
+							provider: 'nomodels',
+							model: 'm',
+						},
+						yolo: {
+							provider: 'validprovider',
+							model: 'model1',
+						},
+					},
+				},
+			},
+			modeProviders => {
+				t.deepEqual(modeProviders, {
+					yolo: {
+						provider: 'validprovider',
+						model: 'model1',
+					},
+				});
+			},
+		);
+
+		t.true(
+			errors.some(err =>
+				err.includes('Provider "nomodels" (modeProviders.plan) has no "models" list'),
+			),
+		);
+		t.false(errors.some(err => err.includes('TypeError')));
+	} finally {
+		setMessageQueueSink(null);
+	}
 });
 
 // Tests for tune (nanocoder.tune)
@@ -1439,6 +1680,43 @@ test.serial('non-boolean autoCommit is treated as off', async t => {
 	}
 });
 
+test.serial('nanocoder.verify.required accepts commands or "auto" and ignores anything else', async t => {
+	const originalCwd = process.cwd();
+	const originalEnv = process.env.NANOCODER_CONFIG_DIR;
+	try {
+		const {reloadAppConfig: reload, getAppConfig} = await import('./index.js');
+		const load = (name: string, nanocoder: object) => {
+			const dir = join(sandboxConfigTestDir, `verify-${name}`);
+			mkdirSync(dir, {recursive: true});
+			writeFileSync(
+				join(dir, 'agents.config.json'),
+				JSON.stringify({nanocoder}),
+				'utf-8',
+			);
+			process.chdir(dir);
+			process.env.NANOCODER_CONFIG_DIR = join(dir, 'no-global');
+			reload();
+			return getAppConfig().verify;
+		};
+
+		t.is(load('unset', {}), undefined);
+		t.deepEqual(load('list', {verify: {required: ['pnpm test', 'pnpm lint']}}), {
+			required: ['pnpm test', 'pnpm lint'],
+		});
+		t.deepEqual(load('auto', {verify: {required: 'auto'}}), {required: 'auto'});
+		t.is(load('string', {verify: {required: 'pnpm test'}}), undefined);
+		t.is(load('number', {verify: {required: [1]}}), undefined);
+		t.is(load('blank', {verify: {required: ['pnpm test', ' ']}}), undefined);
+	} finally {
+		process.chdir(originalCwd);
+		if (originalEnv !== undefined) {
+			process.env.NANOCODER_CONFIG_DIR = originalEnv;
+		} else {
+			delete process.env.NANOCODER_CONFIG_DIR;
+		}
+	}
+});
+
 // ============================================================================
 // lspServers
 // ============================================================================
@@ -1557,6 +1835,32 @@ test.serial(
 			appConfig => {
 				t.is(appConfig.verify?.trustLevel, 'auto-fix');
 				t.is(appConfig.verify?.pollIntervalMs, 5000);
+			},
+		);
+	},
+);
+
+test.serial(
+	'loadAppConfig reads nanocoder.verify.required next to the CI-watch settings',
+	async t => {
+		await withVerifyConfig(
+			'verify-required-with-ci-watch',
+			{
+				nanocoder: {
+					verify: {
+						trustLevel: 'auto-fix',
+						pollIntervalMs: 5000,
+						required: ['pnpm test'],
+					},
+				},
+			},
+			{},
+			appConfig => {
+				t.deepEqual(appConfig.verify, {
+					trustLevel: 'auto-fix',
+					pollIntervalMs: 5000,
+					required: ['pnpm test'],
+				});
 			},
 		);
 	},
@@ -1733,5 +2037,276 @@ test.serial(
 				t.is(appConfig.firewall?.rules?.blockAnyTypeInjection, false);
 			},
 		);
+	},
+);
+
+test.serial(
+	'loadAppConfig reads agents.config.json that starts with a UTF-8 BOM',
+	async t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(verifyTestDir, 'bom-config');
+		const globalConfigDir = join(testSubdir, 'global-config');
+		mkdirSync(testSubdir, {recursive: true});
+		mkdirSync(globalConfigDir, {recursive: true});
+
+		try {
+			writeFileSync(
+				join(testSubdir, 'agents.config.json'),
+				'\uFEFF' +
+					JSON.stringify({nanocoder: {retries: {maxEmptyTurns: 7}}}),
+				'utf-8',
+			);
+			process.chdir(testSubdir);
+			process.env.NANOCODER_CONFIG_DIR = globalConfigDir;
+
+			const {resetPreferencesCache} = await import('./preferences.js');
+			resetPreferencesCache();
+			const {reloadAppConfig: reload, getAppConfig} = await import(
+				'./index.js'
+			);
+			reload();
+			t.is(getAppConfig().retries?.maxEmptyTurns, 7);
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+			const {resetPreferencesCache} = await import('./preferences.js');
+			resetPreferencesCache();
+		}
+	},
+);
+
+test.serial(
+	'config set round-trips an agents.config.json that starts with a UTF-8 BOM',
+	t => {
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const testSubdir = join(verifyTestDir, 'bom-config-set');
+		const configFile = join(testSubdir, 'agents.config.json');
+		mkdirSync(testSubdir, {recursive: true});
+
+		try {
+			writeFileSync(
+				configFile,
+				'\uFEFF' +
+					JSON.stringify({nanocoder: {lsp: {autoDiscover: false}}}),
+				'utf-8',
+			);
+			process.chdir(testSubdir);
+			// getClosestConfigFile skips the cwd lookup once NANOCODER_CONFIG_DIR
+			// is set, so the env var has to go for the project file to be the
+			// active write target.
+			delete process.env.NANOCODER_CONFIG_DIR;
+
+			updateConfigNestedValue('retries', 'maxEmptyTurns', 9);
+
+			const raw = readFileSync(configFile, 'utf-8');
+			const written = JSON.parse(raw) as {
+				nanocoder?: {retries?: {maxEmptyTurns?: number}; lsp?: unknown};
+			};
+			t.is(written.nanocoder?.retries?.maxEmptyTurns, 9);
+			t.deepEqual(written.nanocoder?.lsp, {autoDiscover: false});
+			// The atomic rewrite normalises the file, dropping the BOM.
+			t.false(raw.startsWith('\uFEFF'));
+		} finally {
+			clearAppConfig();
+			process.chdir(originalCwd);
+			if (originalConfigDir !== undefined) {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			} else {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			}
+		}
+	},
+);
+
+test.serial(
+	'invalid project agents.config.json reports a single parse error and falls back to global config',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-broken-config-'));
+		const projectDir = join(dir, 'project');
+		const globalDir = join(dir, 'global');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		const projectConfigFile = join(projectDir, 'agents.config.json');
+		const globalConfigFile = join(globalDir, 'agents.config.json');
+
+		// Invalid JSON with trailing comma in project file
+		writeFileSync(
+			projectConfigFile,
+			'{"nanocoder": {"providers": [{"name":"a","models":["m"],"baseUrl":"http://x"},]}}',
+			'utf-8',
+		);
+
+		// Valid global config with provider global-one
+		writeFileSync(
+			globalConfigFile,
+			JSON.stringify({
+				nanocoder: {
+					providers: [
+						{
+							name: 'global-one',
+							models: ['m-global'],
+							baseUrl: 'http://global',
+						},
+					],
+				},
+			}),
+			'utf-8',
+		);
+
+		const capturedMessages: Array<{type: string; message: string}> = [];
+
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const originalNodeEnv = process.env.NODE_ENV;
+
+		try {
+			process.chdir(projectDir);
+			process.env.NANOCODER_CONFIG_DIR = globalDir;
+			process.env.NODE_ENV = 'development';
+
+			clearAppConfig();
+			setMessageQueueSink(null);
+
+			// First read happens before any sink is set (e.g. resolveActiveProfile at CLI startup)
+			resolveActiveProfile();
+			t.is(capturedMessages.length, 0, 'No error captured before sink is set');
+
+			// Now install the sink (plain shell or TUI mounts)
+			setMessageQueueSink((type, message) => {
+				capturedMessages.push({type, message});
+			});
+
+			reloadAppConfig();
+			const config = getAppConfig();
+
+			// Count error messages
+			const errors = capturedMessages.filter(m => m.type === 'error');
+			t.is(
+				errors.length,
+				1,
+				`Expected exactly 1 error message for broken project config, got: ${JSON.stringify(errors.map(e => e.message))}`,
+			);
+			t.true(
+				errors[0]!.message.includes(projectConfigFile),
+				'Error message should name the file',
+			);
+			t.regex(
+				errors[0]!.message,
+				/SyntaxError/i,
+				'Error message should contain JSON syntax error',
+			);
+			t.true(
+				errors[0]!.message.includes('project config skipped'),
+				'Error message should say project config skipped',
+			);
+
+			// Verify fallback to global provider
+			t.is(config.providers.length, 1);
+			t.is(config.providers[0]?.name, 'global-one');
+		} finally {
+			setMessageQueueSink(null);
+			process.chdir(originalCwd);
+
+			if (originalConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			}
+
+			if (originalNodeEnv === undefined) {
+				delete process.env.NODE_ENV;
+			} else {
+				process.env.NODE_ENV = originalNodeEnv;
+			}
+
+			clearAppConfig();
+			rmSync(dir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'invalid global agents.config.json reports a single parse error',
+	t => {
+		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-broken-global-'));
+		const projectDir = join(dir, 'project');
+		const globalDir = join(dir, 'global');
+		mkdirSync(projectDir, {recursive: true});
+		mkdirSync(globalDir, {recursive: true});
+
+		const globalConfigFile = join(globalDir, 'agents.config.json');
+
+		// Invalid JSON with trailing comma in global file
+		writeFileSync(
+			globalConfigFile,
+			'{"nanocoder": {"providers": [{"name":"a","models":["m"],"baseUrl":"http://x"},]}}',
+			'utf-8',
+		);
+
+		const capturedMessages: Array<{type: string; message: string}> = [];
+		setMessageQueueSink((type, message) => {
+			capturedMessages.push({type, message});
+		});
+
+		const originalCwd = process.cwd();
+		const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+		const originalNodeEnv = process.env.NODE_ENV;
+
+		try {
+			process.chdir(projectDir);
+			process.env.NANOCODER_CONFIG_DIR = globalDir;
+			process.env.NODE_ENV = 'development';
+
+			clearAppConfig();
+			reloadAppConfig();
+			getAppConfig();
+
+			// Count error messages
+			const errors = capturedMessages.filter(m => m.type === 'error');
+			t.is(
+				errors.length,
+				1,
+				`Expected exactly 1 error message for broken global config, got: ${JSON.stringify(errors.map(e => e.message))}`,
+			);
+			t.true(
+				errors[0]!.message.includes(globalConfigFile),
+				'Error message should name the file',
+			);
+			t.regex(
+				errors[0]!.message,
+				/SyntaxError/i,
+				'Error message should contain JSON syntax error',
+			);
+			t.true(
+				errors[0]!.message.includes('global config skipped'),
+				'Error message should say global config skipped',
+			);
+		} finally {
+			setMessageQueueSink(null);
+			process.chdir(originalCwd);
+
+			if (originalConfigDir === undefined) {
+				delete process.env.NANOCODER_CONFIG_DIR;
+			} else {
+				process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+			}
+
+			if (originalNodeEnv === undefined) {
+				delete process.env.NODE_ENV;
+			} else {
+				process.env.NODE_ENV = originalNodeEnv;
+			}
+
+			clearAppConfig();
+			rmSync(dir, {recursive: true, force: true});
+		}
 	},
 );

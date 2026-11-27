@@ -80,6 +80,18 @@ export function createReviewGitFixture(): ReviewGitFixture {
 	};
 }
 
+/** Match the error `execGit` rejects with, so exit-code checks behave the same. */
+function asExecGitError(error: unknown): Error {
+	const failure = error as {status?: unknown; stderr?: unknown};
+	if (typeof failure.status !== 'number') {
+		return error instanceof Error ? error : new Error(String(error));
+	}
+	const stderr = failure.stderr ? String(failure.stderr).trim() : '';
+	return new Error(
+		stderr || `Git command failed with exit code ${failure.status}`,
+	);
+}
+
 export function createReviewFixtureTools(
 	fixture: ReviewGitFixture,
 	options: {
@@ -91,7 +103,11 @@ export function createReviewFixtureTools(
 		...defaultReviewFoundationTools,
 		execGit: async (args, signal, env) => {
 			if (signal?.aborted) throw new Error('cancelled');
-			return fixture.runGit(args, env);
+			try {
+				return fixture.runGit(args, env);
+			} catch (error) {
+				throw asExecGitError(error);
+			}
 		},
 		execGitBuffer: async (args, signal) => {
 			if (signal?.aborted) throw new Error('cancelled');

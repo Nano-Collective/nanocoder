@@ -8,13 +8,9 @@ import {writeFileSync} from 'node:fs';
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,
-} from '@/config/project-trust';
-import {
-	isDirectoryTrusted,
-	loadPreferences,
-	resetPreferencesCache,
-	savePreferences,
-} from '@/config/preferences';
+} from '@/config/trust/project-trust';
+import {loadPreferences, resetPreferencesCache, savePreferences} from '@/config/preferences';
+import {isDirectoryTrusted} from '@/config/trust/directory-trust';
 import {useDirectoryTrust} from './useDirectoryTrust';
 
 console.log('\nuseDirectoryTrust.spec.tsx');
@@ -65,7 +61,11 @@ test.serial('reports trust exactly as isDirectoryTrusted does', async t => {
 		{
 			label: 'current fingerprint',
 			stored: root => [
-				{path: root, fingerprint: describeProjectTrust(root).fingerprint},
+				{
+					path: root,
+					fingerprint: describeProjectTrust(root).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+				},
 			],
 		},
 		{
@@ -74,6 +74,7 @@ test.serial('reports trust exactly as isDirectoryTrusted does', async t => {
 				{
 					path: unnormalized(root),
 					fingerprint: describeProjectTrust(root).fingerprint,
+					fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 				},
 			],
 		},
@@ -134,6 +135,7 @@ test.serial(
 			const stored = {
 				path: unnormalized(root),
 				fingerprint: describeProjectTrust(root).fingerprint,
+				fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 			};
 			savePreferences({trustedDirectories: [stored]});
 			resetPreferencesCache();

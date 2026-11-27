@@ -1,6 +1,6 @@
 import test from 'ava';
 import {execFileSync, spawnSync} from 'child_process';
-import {mkdtempSync, rmSync, writeFileSync} from 'fs';
+import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'fs';
 import {tmpdir} from 'os';
 import {join} from 'path';
 import {fileURLToPath} from 'url';
@@ -130,12 +130,46 @@ test('CLI integration: help and version remain fast for worktree arguments', t =
 	t.regex(version, /^\d+\.\d+\.\d+$/);
 });
 
-test('CLI integration: review PR command retains its interactive guard', t => {
-	const result = spawnSync(process.execPath, [cliPath, 'review', '42'], {
-		encoding: 'utf8',
-	});
+test.serial('CLI integration: review PR command without a TTY runs the headless review trust gate', t => {
+	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-review-'));
+	const configPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-review-config-'));
+	try {
+		const env: NodeJS.ProcessEnv = {...process.env, NANOCODER_CONFIG_DIR: configPath};
+		delete env.NANOCODER_TRUST_DIRECTORY;
+		const result = spawnSync(process.execPath, [cliPath, 'review', '42'], {
+			cwd: projectPath,
+			encoding: 'utf8',
+			env,
+		});
+		t.is(result.status, 1);
+		t.true(result.stderr.includes('is not trusted. Pass --trust-directory'));
+		t.is(result.stdout, '');
+	} finally {
+		rmSync(projectPath, {recursive: true, force: true});
+		rmSync(configPath, {recursive: true, force: true});
+	}
+});
+
+test('CLI integration: review rejects unknown options', t => {
+	const result = spawnSync(
+		process.execPath,
+		[cliPath, 'review', '--bogus', 'main'],
+		{encoding: 'utf8'},
+	);
 	t.is(result.status, 1);
-	t.true(result.stderr.includes('`nanocoder review` requires an interactive terminal'));
+	t.true(result.stderr.includes('Unknown option "--bogus"'), result.stderr);
+});
+
+test('CLI integration: review rejects options it does not support', t => {
+	// `--resume` is a top-level flag; before this was validated it reached the
+	// review parser as positionals and produced a bogus "Extra arguments" error.
+	const result = spawnSync(
+		process.execPath,
+		[cliPath, 'review', '--resume', 'last', 'main'],
+		{encoding: 'utf8'},
+	);
+	t.is(result.status, 1);
+	t.true(result.stderr.includes('Unknown option "--resume"'), result.stderr);
 });
 
 test('CLI integration: init help exits successfully with preset guidance', t => {
@@ -186,6 +220,34 @@ test.serial('CLI integration: init invalid preset exits with an error', t => {
 				'Unknown preset "constructor". Supported presets: react, nextjs, rust.',
 			),
 		);
+	} finally {
+		rmSync(projectPath, {recursive: true, force: true});
+	}
+});
+
+test.serial('CLI integration: init rejects unknown and unsupported options', t => {
+	const projectPath = mkdtempSync(join(tmpdir(), 'nanocoder-cli-init-'));
+	try {
+		for (const options of [
+			['--bogus', '--preset', 'rust'],
+			// Global flags are not honoured by `init`, so they must fail rather
+			// than being accepted and silently dropped.
+			['--provider', 'ollama', '--preset', 'rust'],
+		]) {
+			const result = spawnSync(
+				process.execPath,
+				[cliPath, 'init', ...options],
+				{cwd: projectPath, encoding: 'utf8'},
+			);
+
+			t.is(result.status, 1, options.join(' '));
+			t.true(
+				result.stderr.includes(`Unknown option "${options[0]}"`),
+				result.stderr,
+			);
+			t.false(result.stdout.includes('initialized successfully'));
+		}
+		t.false(existsSync(join(projectPath, 'AGENTS.md')));
 	} finally {
 		rmSync(projectPath, {recursive: true, force: true});
 	}

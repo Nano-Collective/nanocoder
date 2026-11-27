@@ -11,19 +11,22 @@ import {
 	resetAutoCompactSession,
 	setAutoCompactStrategy,
 	setAutoCompactThreshold,
-} from "@/utils/auto-compact.js";
+} from "@/conversation/compaction/auto-compact.js";
 import type { ToolManager } from "@/tools/tool-manager";
+import { TUNE_DEFAULTS } from "@/types/config";
 import type {
 	AISDKCoreTool,
 	DevelopmentMode,
 	LLMChatResponse,
 	LLMClient,
 	Message,
+	ModeOverrides,
 	ToolApprovalPolicy,
 	ToolCall,
 	ToolEntry,
 	ToolHandler,
 } from "@/types/core";
+import "@/tools/file-ops/write-file";
 import { runPlainConversation } from "./conversation.js";
 
 // Suppress ANSI in test output so tokens streamed to stdout stay readable.
@@ -128,6 +131,33 @@ test("returns success when model emits content and no tool calls", async (t) => 
 
 	t.is(outcome.kind, "success");
 	t.is(outcome.steps, 1);
+});
+
+test("tune's XML tool mode asks the client not to send native tools", async (t) => {
+	const seen: Array<ModeOverrides | undefined> = [];
+	const client: LLMClient = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (_messages, _tools, _callbacks, _signal, modeOverrides) => {
+			seen.push(modeOverrides);
+			return {
+				choices: [{ message: { role: "assistant", content: "done" } }],
+			};
+		},
+	};
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		tune: { ...TUNE_DEFAULTS, enabled: true, toolMode: "xml" },
+	});
+
+	t.is(outcome.kind, "success");
+	t.is(seen[0]?.nativeToolsDisabled, true);
 });
 
 test("nudges through empty responses up to the cap, then returns error", async (t) => {
@@ -1462,6 +1492,97 @@ test.serial(
 	},
 );
 
+test.serial(
+	"ignores non-finite usage fields instead of poisoning the totals",
+	async (t) => {
+		// NaN and Infinity are broken reports, not counts: a NaN total would
+		// make every later sum NaN, and an Infinity input would read as
+		// unbounded spend in the --json report.
+		const reply = (usage: Record<string, number>) => ({
+			choices: [
+				{ message: { role: "assistant" as const, content: "" } },
+			],
+			usage,
+		});
+		const toolCall: ToolCall = {
+			id: "call-1",
+			function: { name: "safe_tool", arguments: {} },
+		};
+		const client = makeFakeClient({
+			responses: [
+				{
+					...reply({
+						inputTokens: Number.NaN,
+						outputTokens: 10,
+						totalTokens: Number.NaN,
+					}),
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: "",
+								tool_calls: [toolCall],
+							},
+						},
+					],
+				},
+				{
+					...reply({ inputTokens: 100, outputTokens: Number.POSITIVE_INFINITY }),
+					choices: [{ message: { role: "assistant", content: "done" } }],
+				},
+			],
+		});
+		setToolRegistryGetter(() => ({ safe_tool: async () => "ok" }));
+		const toolManager = makeFakeToolManager({
+			knownTools: new Set(["safe_tool"]),
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager,
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.deepEqual(outcome.usage, {
+			inputTokens: 100,
+			outputTokens: 10,
+			totalTokens: 110,
+		});
+	},
+);
+
+test.serial(
+	"omits usage when the provider reports only non-finite fields",
+	async (t) => {
+		const client = makeFakeClient({
+			responses: [
+				{
+					choices: [{ message: { role: "assistant", content: "done" } }],
+					usage: { inputTokens: Number.NaN, totalTokens: Number.NaN },
+				},
+			],
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.usage, undefined);
+	},
+);
+
 // --- Agent-loop retry limits (nanocoder.retries) — issue #897 ---
 
 function repeatingToolResponse(): Partial<LLMChatResponse> {
@@ -2586,5 +2707,360 @@ test.serial(
 
 		t.is(outcome.kind, "success");
 		t.is(calls.length, 1);
+	},
+);
+
+// ---------------------------------------------------------------------------
+// nanocoder.verify: a run that edited files cannot end without evidence
+// ---------------------------------------------------------------------------
+
+const toolTurn = (id: string, name: string, args: Record<string, unknown>) => ({
+	choices: [
+		{
+			message: {
+				role: "assistant",
+				content: "",
+				tool_calls: [{ id, function: { name, arguments: args } }] as ToolCall[],
+			},
+		},
+	],
+});
+const textTurn = (content: string) => ({
+	choices: [{ message: { role: "assistant", content } }],
+});
+
+/**
+ * Plays the scripted turns, records the last message the model saw on each
+ * call, and answers execute_bash with the given exit code.
+ */
+async function runVerified(
+	script: Array<Record<string, unknown>>,
+	bashExitCode: number,
+	required: string[] | undefined,
+) {
+	const seen: string[] = [];
+	let call = 0;
+	const client = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (
+			messages: Message[],
+			_tools: unknown,
+			callbacks: { onToken?: (token: string) => void },
+		): Promise<LLMChatResponse> => {
+			seen.push(messages.at(-1)?.content ?? "");
+			const turn = script[call++] as unknown as LLMChatResponse | undefined;
+			if (!turn) throw new Error("script ran out");
+			const text = turn.choices[0]?.message.content;
+			if (text) callbacks.onToken?.(text);
+			return turn;
+		},
+	} as unknown as LLMClient;
+	setToolRegistryGetter(() => ({
+		write_file: (async () => "File written") as ToolHandler,
+		execute_bash: (async () =>
+			`EXIT_CODE: ${bashExitCode}\noutput`) as ToolHandler,
+	}));
+
+	const previous = getAppConfig().verify;
+	getAppConfig().verify = required ? { required } : undefined;
+	try {
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager({
+				knownTools: new Set(["write_file", "execute_bash"]),
+			}),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "yolo",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+		});
+		return { outcome, seen, calls: call };
+	} finally {
+		getAppConfig().verify = previous;
+	}
+}
+
+test.serial("verify: a headless run is sent back until the required command passes", async (t) => {
+	const { outcome, seen, calls } = await runVerified(
+		[
+			toolTurn("w", "write_file", { path: "a.ts", content: "x" }),
+			textTurn("Fixed it."),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			textTurn("Confirmed."),
+		],
+		0,
+		["pnpm test"],
+	);
+
+	t.is(calls, 4);
+	t.true(seen[2]?.includes("`pnpm test` (not run)"), "the model is told what to run");
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.finalText, "Fixed it.\n\nVerification: ✓ pnpm test (exit 0)");
+	}
+});
+
+test.serial("verify: a failing run is not evidence, and the model may finish after two reminders", async (t) => {
+	const { outcome, seen, calls } = await runVerified(
+		[
+			toolTurn("w", "write_file", { path: "a.ts", content: "x" }),
+			textTurn("Done."),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			textTurn("Still done."),
+			textTurn("Really done."),
+		],
+		1,
+		["pnpm test"],
+	);
+
+	t.is(calls, 5);
+	t.true(seen[4]?.includes("last run exited 1"));
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.is(outcome.finalText, "Done.\n\nVerification: ✗ pnpm test (last run exited 1)");
+	}
+});
+
+test.serial("verify: an edit after a passing run makes the evidence stale", async (t) => {
+	const { seen, calls } = await runVerified(
+		[
+			toolTurn("w1", "write_file", { path: "a.ts", content: "x" }),
+			toolTurn("b", "execute_bash", { command: "pnpm test" }),
+			toolTurn("w2", "write_file", { path: "a.ts", content: "y" }),
+			textTurn("Done."),
+			toolTurn("b2", "execute_bash", { command: "pnpm test" }),
+			textTurn("Confirmed."),
+		],
+		0,
+		["pnpm test"],
+	);
+
+	t.is(calls, 6);
+	t.true(seen[4]?.includes("not run since your last edit"));
+});
+
+test.serial("verify: nothing changes when it is not configured", async (t) => {
+	const { outcome, calls } = await runVerified(
+		[toolTurn("w", "write_file", { path: "a.ts", content: "x" }), textTurn("Done.")],
+		0,
+		undefined,
+	);
+
+	t.is(calls, 2);
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") t.is(outcome.finalText, "Done.");
+});
+
+test.serial("verify: a run that edited nothing is not held up", async (t) => {
+	const { outcome, calls } = await runVerified([textTurn("Just an answer.")], 0, [
+		"pnpm test",
+	]);
+
+	t.is(calls, 1);
+	if (outcome.kind === "success") t.is(outcome.finalText, "Just an answer.");
+});
+
+// --- Structured output (`--json-schema`) ---
+
+const reviewSchema = {
+	type: "object",
+	required: ["verdict", "issues"],
+	additionalProperties: false,
+	properties: {
+		verdict: { type: "string", enum: ["pass", "fail"] },
+		issues: {
+			type: "array",
+			items: {
+				type: "object",
+				required: ["file", "line", "message"],
+				properties: {
+					file: { type: "string" },
+					line: { type: "integer", minimum: 1 },
+					message: { type: "string" },
+				},
+			},
+		},
+	},
+} as const;
+
+test.serial("json-schema: accepts a final answer that validates", async (t) => {
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: '{"verdict":"pass","issues":[]}',
+						},
+					},
+				],
+			},
+		],
+	});
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager(),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		jsonSchema: reviewSchema,
+	});
+
+	t.is(outcome.kind, "success");
+	if (outcome.kind === "success") {
+		t.deepEqual(outcome.structured, { verdict: "pass", issues: [] });
+		t.is(
+			outcome.finalText,
+			JSON.stringify({ verdict: "pass", issues: [] }, null, 2),
+		);
+	}
+});
+
+test.serial(
+	"json-schema: feeds validation errors back and succeeds on retry",
+	async (t) => {
+		const calls: RecordedCall[] = [];
+		const client = makeRecordingClient(
+			[
+				{
+					choices: [
+						{ message: { role: "assistant", content: '{"verdict":"pass"}' } },
+					],
+				},
+				{
+					choices: [
+						{
+							message: {
+								role: "assistant",
+								content: '{"verdict":"pass","issues":[]}',
+							},
+						},
+					],
+				},
+			],
+			calls,
+		);
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+			jsonSchema: reviewSchema,
+		});
+
+		t.is(outcome.kind, "success");
+		t.is(outcome.steps, 2);
+		if (outcome.kind === "success") {
+			t.deepEqual(outcome.structured, { verdict: "pass", issues: [] });
+			t.is(
+				outcome.finalText,
+				JSON.stringify({verdict: 'pass', issues: []}, null, 2),
+			);
+		}
+
+		const correction = calls[1].messages.find(
+			message =>
+				message.role === "user" &&
+				/did not validate against the required JSON Schema/.test(
+					String(message.content),
+				),
+		);
+		t.truthy(correction, "the retry turn must carry the validator errors");
+		t.regex(String(correction?.content), /issues/);
+	},
+);
+
+test.serial(
+	"json-schema: stops with the validator errors when the cap is hit",
+	async (t) => {
+		const invalid = {
+			choices: [
+				{ message: { role: "assistant", content: '{"verdict":"pass"}' } },
+			],
+		};
+		const client = makeFakeClient({
+			responses: [invalid, invalid, invalid],
+		});
+
+		const outcome = await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+			jsonSchema: reviewSchema,
+		});
+
+		t.is(outcome.kind, "error");
+		t.is(outcome.steps, 3);
+		if (outcome.kind === "error") {
+			t.regex(outcome.message, /did not validate against the JSON Schema/);
+			t.regex(outcome.message, /after 3 attempts/);
+			t.regex(outcome.message, /issues: must have required property/);
+		}
+	},
+);
+
+test.serial(
+	"json-schema: streamed tokens and reasoning stay off stdout",
+	async (t) => {
+		const originalWrite = process.stdout.write.bind(process.stdout);
+		let stdout = "";
+		// biome-ignore lint/suspicious/noExplicitAny: matching Node's overloaded write signature
+		(process.stdout.write as any) = (chunk: any) => {
+			stdout += String(chunk);
+			return true;
+		};
+
+		try {
+			const client = {
+				...makeFakeClient({ responses: [] }),
+				chat: async (
+					_messages: Message[],
+					_tools: Record<string, AISDKCoreTool>,
+					callbacks: { onToken?: (token: string) => void; onReasoningToken?: (token: string) => void },
+				) => {
+					callbacks.onReasoningToken?.("thinking");
+					callbacks.onToken?.('{"verdict":"pass","issues":[]}');
+					return {
+						choices: [
+							{
+								message: {
+									role: "assistant",
+									content: '{"verdict":"pass","issues":[]}',
+								},
+							},
+						],
+					} as LLMChatResponse;
+				},
+			} as unknown as LLMClient;
+
+			const outcome = await runPlainConversation({
+				client,
+				toolManager: makeFakeToolManager(),
+				systemMessage: SYSTEM,
+				initialMessages: [USER],
+				developmentMode: "auto-accept",
+				nonInteractiveAlwaysAllow: [],
+				abortSignal: new AbortController().signal,
+				jsonSchema: reviewSchema,
+			});
+
+			t.is(outcome.kind, "success");
+			t.is(stdout, "");
+		} finally {
+			process.stdout.write = originalWrite;
+		}
 	},
 );

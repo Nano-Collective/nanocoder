@@ -1,9 +1,9 @@
+import {randomBytes} from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import {diffLines} from 'diff';
 import { WebviewToExtensionMessage, ExtensionToWebviewMessage, MentionItem, WebviewMessageAddProvider, ExtensionMessageSettingsData } from './webview-protocol';
-
-
 
 import { NanocoderAcpClient } from './acp-client';
 import { DiffManager } from './diff-manager';
@@ -55,7 +55,6 @@ export class ChatWebviewProvider
 	private _pendingPrompt: string | null = null;
 	private _pendingPromptTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly _queue = new PromptQueue();
-
 	private readonly _settingsManager: SettingsManager;
 	private _isResumingSession = false;
 	private _targetResumingSessionId?: string;
@@ -150,6 +149,7 @@ export class ChatWebviewProvider
 				if (block.type === 'diff' && block.path) {
 					const toolCallId = update.toolCallId || payload.toolCallId;
 					const id = toolCallId ? `${toolCallId}_${path.normalize(block.path)}` : block.path;
+					const isNew = !this._diffManager.getPendingChange(id);
 					this._diffManager.addPendingChange({
 						type: 'file_change',
 						id,
@@ -159,8 +159,56 @@ export class ChatWebviewProvider
 						toolName: update.title || update.name || 'edit',
 						toolArgs: update.rawInput || {}
 					});
+
+					if (isNew) {
+						this._postPendingChangeAdded(
+							toolCallId || block.path,
+							block.path,
+							block.oldText || '',
+							block.newText || ''
+						);
+					}
 				}
 			}
+		}
+	}
+
+	private _postPendingChangeAdded(
+		toolCallId: string,
+		filePath: string,
+		oldText: string,
+		newText: string
+	) {
+		const changes = diffLines(oldText, newText);
+		const additions = changes
+			.filter(change => change.added)
+			.reduce((total, change) => total + (change.count ?? 0), 0);
+		const deletions = changes
+			.filter(change => change.removed)
+			.reduce((total, change) => total + (change.count ?? 0), 0);
+		this.postMessage({
+			type: 'pendingChangeAdded',
+			toolCallId,
+			filePath,
+			additions,
+			deletions
+		});
+	}
+
+	// A diff can arrive before the webview exists, and the dedup in handleDiffs
+	// would then skip it forever, so the card is rebuilt once the webview is ready.
+	private _replayPendingChanges() {
+		for (const change of this._diffManager.getPendingChanges()) {
+			const suffix = `_${path.normalize(change.filePath)}`;
+			const toolCallId = change.id.endsWith(suffix)
+				? change.id.slice(0, -suffix.length)
+				: change.id;
+			this._postPendingChangeAdded(
+				toolCallId,
+				change.filePath,
+				change.originalContent,
+				change.newContent
+			);
 		}
 	}
 
@@ -333,6 +381,7 @@ export class ChatWebviewProvider
 					case 'ready':
 						this._outputChannel.appendLine('[Webview] Chat shell is ready.');
 						this._isWebviewReady = true;
+						this._replayPendingChanges();
 						this._handleTokenUsageVisibility();
 						this._initializeSessionIfReady();
 						break;
@@ -1223,11 +1272,11 @@ export class ChatWebviewProvider
 	}
 }
 
-function getNonce() {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
+/**
+ * The CSP script nonce. It is the only thing that stops injected markup from
+ * running script in the webview, so it must be unguessable: Math.random is
+ * not a CSPRNG.
+ */
+export function getNonce(): string {
+	return randomBytes(16).toString('hex');
 }

@@ -6,7 +6,10 @@ import {runAcpConversation} from '@/acp/acp-conversation';
 import {AcpSession} from '@/acp/acp-session';
 import {clearAppConfig, reloadAppConfig} from '@/config/index';
 import {resetPreferencesCache} from '@/config/preferences';
-import {describeProjectTrust} from '@/config/project-trust';
+import {
+	describeProjectTrust,
+	TRUST_FINGERPRINT_VERSION,
+} from '@/config/trust/project-trust';
 import {
 	appendPostToolUseOutput,
 	runLifecycleHooks,
@@ -14,7 +17,7 @@ import {
 } from '@/services/lifecycle-hooks';
 import {resetSessionCwd, setProjectRoot} from '@/services/session-cwd';
 import type {ToolCall} from '@/types/core';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {setGlobalMessageQueue} from '@/components/message-queue';
 import {
 	consultPluginPermission,
 	loadPlugins,
@@ -47,7 +50,11 @@ function withPlugins(files: Record<string, string>): string {
 }
 
 function trustedRecord(root: string) {
-	return {path: root, fingerprint: describeProjectTrust(root).fingerprint};
+	return {
+		path: root,
+		fingerprint: describeProjectTrust(root).fingerprint,
+		fingerprintVersion: TRUST_FINGERPRINT_VERSION,
+	};
 }
 
 function bashCall(command: string): ToolCall {

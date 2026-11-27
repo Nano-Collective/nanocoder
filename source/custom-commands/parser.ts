@@ -3,7 +3,7 @@ import {parseSubscribeBlockOrWarn} from '@/skills/parse-subscribe';
 import type {CustomCommandMetadata, ParsedCustomCommand} from '@/types/index';
 import type {SkillTrigger} from '@/types/skills';
 import {parseYamlObject, splitFrontmatter} from '@/utils/frontmatter';
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 /**
  * Set of frontmatter keys that are always parsed as arrays
@@ -93,15 +93,17 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 			continue;
 		}
 
-		// Check for multi-line string indicators
-		if (trimmedLine.endsWith('|') || trimmedLine.endsWith('>')) {
-			const colonIndex = line.indexOf(':');
+		{
+			const colonIndex = findColonOutsideQuotes(line);
 			if (colonIndex !== -1) {
-				currentKey = line.slice(0, colonIndex).trim();
-				isMultiline = true;
-				currentValue = [];
-				indentLevel = 0;
-				continue;
+				const value = line.slice(colonIndex + 1).trim();
+				if (isBlockScalarIndicator(value)) {
+					currentKey = line.slice(0, colonIndex).trim();
+					isMultiline = true;
+					currentValue = [];
+					indentLevel = 0;
+					continue;
+				}
 			}
 		}
 
@@ -155,6 +157,10 @@ function parseEnhancedFrontmatter(frontmatter: string): CustomCommandMetadata {
 	}
 
 	return mapRawToMetadata(raw);
+}
+
+function isBlockScalarIndicator(value: string): boolean {
+	return /^[|>](?:[+-]?\d*|\d+[+-]?)$/.test(value);
 }
 
 /**
@@ -219,7 +225,9 @@ export function parseCommandFile(filePath: string): ParsedCustomCommand {
 			metadata = parseEnhancedFrontmatter(split.frontmatter);
 		} catch (error) {
 			// If parsing fails, treat entire file as content
-			logError(`Failed to parse frontmatter in ${filePath}: ${String(error)}`);
+			notifyError(
+				`Failed to parse frontmatter in ${filePath}: ${String(error)}`,
+			);
 			return {
 				metadata: {},
 				content: fileContent,

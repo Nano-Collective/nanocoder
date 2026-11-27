@@ -1,4 +1,5 @@
 import {SETTINGS_TAB_IDS} from '@/app/components/settings-constants';
+import {findCommandAlias, getAliasesFor} from '@/commands/aliases';
 import type {Command} from '@/types/index';
 
 export const HELP_CATEGORY_ORDER = [
@@ -33,20 +34,20 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'copy',
 		'expand',
 		'export',
+		'jobs',
+		'plans',
 		'rename',
 		'resume',
 		'retry',
-		'schedule',
 		'share',
 		'tasks',
 	],
 	'Model & Configuration': [
-		'codex-login',
 		'context-max',
-		'copilot-login',
 		'init',
+		'login',
 		'model',
-		'model-database',
+		'profile',
 		'setup-config',
 		'settings',
 		'tune',
@@ -57,10 +58,10 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'agents',
 		'commit',
 		'explorer',
+		'firewall',
 		'ide',
 		'mcp',
 		'memory',
-		'remember',
 		'repomap',
 		'review',
 		'skills',
@@ -73,11 +74,11 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'help',
 		'lsp',
 		'privacy',
-		'quit',
 		'stats',
 		'status',
 		'tip',
 		'usage',
+		'whoami',
 	],
 	Other: [],
 };
@@ -87,6 +88,25 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		usage: '/agents [show <name>|copy <name>|create <name>]',
 		options: ['show <name>', 'copy <name>', 'create <name>'],
 		examples: ['/agents', '/agents show explore', '/agents copy explore'],
+	},
+	firewall: {
+		usage:
+			'/firewall [status|enable|disable|mode <strict|lenient|disabled>|toggle <any|tests|exports>|protect <pattern>|unprotect <pattern>|reset]',
+		options: [
+			'status',
+			'enable|disable',
+			'mode <strict|lenient|disabled>',
+			'toggle <any|tests|exports>',
+			'protect <pattern>',
+			'unprotect <pattern>',
+			'reset',
+		],
+		examples: [
+			'/firewall',
+			'/firewall mode lenient',
+			'/firewall protect src/api/**',
+			'/firewall toggle tests',
+		],
 	},
 	help: {
 		category: 'System & Diagnostics',
@@ -149,7 +169,12 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	'context-max': {
 		usage: '/context-max [length]|--reset',
 		options: ['--reset'],
-		examples: ['/context-max', '/context-max 128k', '/context-max --reset'],
+		examples: [
+			'/context-max',
+			'/context-max 128k',
+			'/context-max 1m',
+			'/context-max --reset',
+		],
 	},
 	copy: {
 		usage: '/copy [code]',
@@ -175,19 +200,62 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		options: ['--preset <react|nextjs|rust>', '--force', '--lean'],
 		examples: ['/init', '/init --preset react', '/init --force --lean'],
 	},
+	jobs: {
+		usage: '/jobs [id|kill <id>|kill all]',
+		options: ['id', 'kill <id>', 'kill all'],
+		examples: [
+			'/jobs',
+			'/jobs 3f2a1b9c',
+			'/jobs kill 3f2a1b9c',
+			'/jobs kill all',
+		],
+	},
+	login: {
+		usage: '/login <codex|copilot> [provider name]',
+		options: ['codex [provider name]', 'copilot [provider name]'],
+		examples: ['/login codex', '/login copilot', '/login copilot Work Copilot'],
+	},
 	model: {
-		usage: '/model',
-		examples: ['/model'],
+		usage: '/model [browse]',
+		options: ['browse'],
+		examples: ['/model', '/model browse'],
+	},
+	profile: {
+		usage: '/profile [name|--clear]',
+		options: ['--clear'],
+		examples: [
+			'/profile',
+			'/profile fast',
+			'/profile review',
+			'/profile --clear',
+		],
 	},
 	memory: {
-		usage: '/memory [list|ls|delete|rm <id>|clear|propose|accept <n>]',
-		options: ['list|ls', 'delete|rm <id>', 'clear', 'propose', 'accept <n>'],
-		examples: ['/memory', '/memory delete 12ab34cd', '/memory propose'],
+		usage:
+			'/memory [list|ls|add [--category <name>] <text>|delete|rm <id>|clear|propose|accept <n>]',
+		options: [
+			'list|ls',
+			'add [--category|-c <name>] <text>',
+			'delete|rm <id>',
+			'clear',
+			'propose',
+			'accept <n>',
+		],
+		examples: [
+			'/memory',
+			'/memory add --category architecture Use TypeScript',
+			'/memory delete 12ab34cd',
+			'/memory propose',
+		],
 	},
-	remember: {
-		usage: '/remember [--category <name>] <memory>',
-		options: ['--category <name>'],
-		examples: ['/remember --category architecture Use TypeScript'],
+	plans: {
+		usage: '/plans [list|show [id]|use <id|none>|delete <id>]',
+		options: ['list', 'show [id]', 'use <id|none>', 'delete|rm <id>'],
+		examples: [
+			'/plans',
+			'/plans show auth-refactor',
+			'/plans use auth-refactor',
+		],
 	},
 	privacy: {
 		usage: '/privacy inspect <text>',
@@ -201,7 +269,6 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	},
 	resume: {
 		usage: '/resume',
-		aliases: ['sessions', 'history'],
 		examples: ['/resume'],
 	},
 	review: {
@@ -231,13 +298,14 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 	},
 	skills: {
 		usage:
-			'/skills [show|create|check|promote|demote] <name> [--force] [--move]',
+			'/skills [show|create|check|promote|demote <name> [--force] [--move]|schedule]',
 		options: [
 			'show <name>',
 			'create <name>',
 			'check <name>',
 			'promote <name> [--force] [--move]',
 			'demote <name> [--force] [--move]',
+			'schedule (list cron-triggered skills)',
 		],
 		examples: [
 			'/skills',
@@ -302,12 +370,27 @@ const CATEGORY_BY_COMMAND = new Map<string, HelpCategory>(
 	),
 );
 
+/**
+ * Old names that now run this command (see `aliases.ts`), shown on its help
+ * page. One that inserts a subcommand says so: `remember (= /memory add)`.
+ */
+function getCommandAliases(commandName: string): string[] {
+	return [
+		...getAliasesFor(commandName).map(alias =>
+			alias.args?.length
+				? `${alias.name} (= /${alias.target} ${alias.args.join(' ')})`
+				: alias.name,
+		),
+	];
+}
+
 export function getCommandHelpDetails(command: Command): CommandHelpDetails {
 	const overrides = COMMAND_HELP_OVERRIDES[command.name];
+	const aliases = getCommandAliases(command.name);
 	return {
 		category: getCommandHelpCategory(command.name),
 		usage: overrides?.usage ?? `/${command.name}`,
-		...(overrides?.aliases ? {aliases: overrides.aliases} : {}),
+		...(aliases.length > 0 ? {aliases} : {}),
 		...(overrides?.options ? {options: overrides.options} : {}),
 		...(overrides?.examples ? {examples: overrides.examples} : {}),
 	};
@@ -328,14 +411,15 @@ export function findHelpCommand(
 	const normalizedName = requestedName.trim().replace(/^\/+/, '').toLowerCase();
 	if (!normalizedName) return undefined;
 
-	return commands.find(command => {
-		if (command.name.toLowerCase() === normalizedName) return true;
-		return (
-			COMMAND_HELP_OVERRIDES[command.name]?.aliases?.some(
-				alias => alias.toLowerCase() === normalizedName,
-			) ?? false
-		);
-	});
+	// `/help remember` shows the command the old name now runs.
+	const alias = findCommandAlias(normalizedName);
+	if (alias) {
+		return commands.find(command => command.name === alias.target);
+	}
+
+	return commands.find(
+		command => command.name.toLowerCase() === normalizedName,
+	);
 }
 
 export interface HelpCommandGroup {
@@ -349,6 +433,7 @@ export function groupHelpCommands(
 	const grouped = new Map<HelpCategory, Command[]>();
 
 	for (const command of commands) {
+		if (command.hidden) continue;
 		const category = getCommandHelpCategory(command.name);
 		const categoryCommands = grouped.get(category) ?? [];
 		categoryCommands.push(command);

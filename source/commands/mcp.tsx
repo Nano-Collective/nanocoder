@@ -1,14 +1,15 @@
-import {Box, Text} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import Spinner from 'ink-spinner';
 import React, {useEffect, useState} from 'react';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {getToolManager} from '@/message-handler';
-import {generateKey} from '@/session/key-generator';
 import {ToolManager} from '@/tools/tool-manager';
 import type {Command} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
+import {generateKey} from '@/utils/key-generator';
+import {redactUrlSecrets} from '@/utils/url-utils';
 
 // Helper function to get transport icons
 function getTransportIcon(transportType: string): string {
@@ -135,7 +136,9 @@ export function MCP({toolManager}: MCPProps) {
 									</Text>
 
 									{serverInfo?.url && (
-										<Text color={colors.info}>URL: {serverInfo.url}</Text>
+										<Text color={colors.info}>
+											URL: {redactUrlSecrets(serverInfo.url)}
+										</Text>
 									)}
 
 									{serverInfo?.description && (
@@ -218,20 +221,28 @@ interface LoginState {
  * flow or a second loopback listener.
  */
 export class MCPLoginFlow {
+	private readonly controller = new AbortController();
 	private state: LoginState = {status: 'starting'};
 	private listeners = new Set<(state: LoginState) => void>();
 
 	constructor(
 		readonly serverName: string,
-		run: (onAuthorizationUrl: (url: URL) => void) => Promise<void>,
+		run: (
+			onAuthorizationUrl: (url: URL) => void,
+			signal: AbortSignal,
+		) => Promise<void>,
 	) {
 		run(url => {
 			this.update({status: 'visit', authorizationUrl: url.toString()});
-		})
+		}, this.controller.signal)
 			.then(() => this.update({status: 'done'}))
 			.catch((error: unknown) =>
 				this.update({status: 'error', error: formatError(error)}),
 			);
+	}
+
+	cancel(): void {
+		this.controller.abort();
 	}
 
 	getState(): LoginState {
@@ -258,6 +269,12 @@ interface MCPLoginProps {
 export function MCPLogin({flow}: MCPLoginProps) {
 	const [state, setState] = useState<LoginState>(flow.getState());
 	useEffect(() => flow.subscribe(setState), [flow]);
+	useInput(
+		(_input, key) => {
+			if (key.escape) flow.cancel();
+		},
+		{isActive: state.status === 'starting' || state.status === 'visit'},
+	);
 	const boxWidth = useTerminalWidth();
 	const {colors} = useTheme();
 
@@ -285,7 +302,8 @@ export function MCPLogin({flow}: MCPLoginProps) {
 						<Text color={colors.primary}>{state.authorizationUrl}</Text>
 					</Box>
 					<Text color={colors.secondary}>
-						<Spinner type="dots" /> Waiting for the sign-in to finish…
+						<Spinner type="dots" /> Waiting for the sign-in to finish… Press
+						Escape to cancel.
 					</Text>
 				</Box>
 			)}
@@ -375,8 +393,8 @@ export async function handleMcpArgs(
 	}
 
 	if (subcommand === 'login') {
-		const flow = new MCPLoginFlow(serverName, onAuthorizationUrl =>
-			toolManager.loginToMCPServer(serverName, onAuthorizationUrl),
+		const flow = new MCPLoginFlow(serverName, (onAuthorizationUrl, signal) =>
+			toolManager.loginToMCPServer(serverName, onAuthorizationUrl, signal),
 		);
 		return React.createElement(MCPLogin, {key: generateKey('mcp'), flow});
 	}

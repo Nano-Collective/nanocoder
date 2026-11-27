@@ -6,7 +6,7 @@ import { clearAppConfig, reloadAppConfig } from "@/config/index";
 import {
 	describeProjectTrust,
 	TRUST_FINGERPRINT_VERSION,
-} from "@/config/project-trust";
+} from "@/config/trust/project-trust";
 import {
 	clearPendingHookContext,
 	resetSessionStartHooks,
@@ -18,7 +18,7 @@ import type { HooksConfig } from "@/types/config";
 import { TOOL_APPROVAL_REQUIRED_KIND } from "@/constants";
 import type { ToolManager } from "@/tools/tool-manager";
 import type { DevelopmentMode, LLMClient } from "@/types/core";
-import { logError, logWarning } from "@/utils/message-queue";
+import { notifyError, notifyWarning } from "@/components/message-queue";
 import { ShutdownManager } from "@/utils/shutdown";
 import type { PlainConversationOutcome } from "./conversation.js";
 import { runPlainShell } from "./shell.js";
@@ -480,7 +480,7 @@ test.serial(
 );
 
 test.serial(
-	"filesChanged collects paths only from mutating tool calls, deduped",
+	"filesChanged collects paths only from successful mutating tool calls, deduped",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
@@ -526,15 +526,31 @@ test.serial(
 								error: null,
 							},
 							{
-								// Mutating tool that failed: still logs result/error
-								// pass-through, but contributes no file since the call
-								// itself errored before any path-bearing args mattered
-								// for this assertion (failure handling is covered by
-								// the isError tests in conversation.spec.ts).
+								// Mutating tool that failed: its result/error still pass
+								// through, but it changed nothing, so no file.
 								name: "string_replace",
 								arguments: { path: "/repo/d.ts" },
 								result: null,
 								error: "failed to apply patch",
+							},
+							{
+								// file_op is a file tool too: a move changes both ends.
+								name: "file_op",
+								arguments: {
+									operation: "move",
+									path: "/repo/e.ts",
+									destination: "/repo/f.ts",
+								},
+								result: "File moved",
+								error: null,
+							},
+							{
+								// A relative path above the cwd the tool accepted is
+								// still a changed file, not dropped.
+								name: "write_file",
+								arguments: { path: "../sibling/g.ts" },
+								result: "ok",
+								error: null,
 							},
 						],
 					}),
@@ -549,9 +565,15 @@ test.serial(
 		t.is(report.kind, "success");
 		t.deepEqual(
 			new Set(report.filesChanged),
-			new Set(["/repo/a.ts", "/repo/b.ts", "/repo/d.ts"]),
+			new Set([
+				"/repo/a.ts",
+				"/repo/b.ts",
+				"/repo/e.ts",
+				"/repo/f.ts",
+				"../sibling/g.ts",
+			]),
 		);
-		t.is(report.filesChanged.length, 3);
+		t.is(report.filesChanged.length, 5);
 
 		const failedCall = report.toolCalls.find(
 			(tc: { name: string }) => tc.name === "string_replace",
@@ -650,6 +672,7 @@ test.serial(
 								{
 									path: cwd,
 									fingerprint: describeProjectTrust(cwd).fingerprint,
+									fingerprintVersion: TRUST_FINGERPRINT_VERSION,
 								},
 							],
 						}) as never,
@@ -760,6 +783,81 @@ test.serial(
 	},
 );
 
+test.serial(
+	'text schema outcome prints only the structured document to stdout',
+	async t => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		try {
+			await runPlainShell({
+				prompt: 'classify this',
+				developmentMode: 'auto-accept',
+				trustDirectory: true,
+				outputFormat: 'text',
+				jsonSchema: {type: 'object'},
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: 'success',
+						finalText: '{\n  "label": "bug"\n}',
+						structured: {label: 'bug'},
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.deepEqual(JSON.parse(stdout.get()), {label: 'bug'});
+		t.true(stdout.get().endsWith('\n'));
+		t.is(stdout.get().trim().split('\n').length, 3);
+		t.is(shutdown.code, 0);
+		t.regex(stderr.get(), /done/);
+	},
+);
+
+test.serial(
+	'--json schema outcome includes the structured key in the report',
+	async t => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		try {
+			await runPlainShell({
+				prompt: 'classify this',
+				developmentMode: 'auto-accept',
+				trustDirectory: true,
+				outputFormat: 'json',
+				jsonSchema: {type: 'object'},
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: makeFakeRunPlainConversation({
+						kind: 'success',
+						finalText: '{\n  "label": "bug"\n}',
+						structured: {label: 'bug'},
+						reasoning: null,
+						steps: 1,
+						toolCalls: [],
+					}),
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+				}),
+			});
+		} finally {
+			stdout.restore();
+		}
+
+		const report = JSON.parse(stdout.get());
+		t.deepEqual(report.structured, {label: 'bug'});
+		t.is(report.finalText, '{\n  "label": "bug"\n}');
+		t.is(shutdown.code, 0);
+	},
+);
+
 // --- Text mode (outputFormat: 'text') ---
 //
 // Unlike --json, text mode writes status/boot/error/"done" lines to stderr
@@ -810,12 +908,52 @@ test.serial(
 );
 
 test.serial(
+	"plain mode appends the persisted plan to the system prompt",
+	async (t) => {
+		const shutdown: CapturedShutdown = {code: null};
+		const stdout = capturingStdout();
+		const stderr = capturingStderr();
+		let systemContent = "";
+		try {
+			await runPlainShell({
+				prompt: "continue the plan",
+				developmentMode: "auto-accept",
+				trustDirectory: true,
+				outputFormat: "text",
+				deps: baseDeps({
+					initializePlain: makeFakeInitializePlain(),
+					runPlainConversation: async (options) => {
+						systemContent = String(options.systemMessage.content);
+						return {
+							kind: "success",
+							finalText: "all done",
+							reasoning: null,
+							steps: 1,
+							toolCalls: [],
+						};
+					},
+					getShutdownManager: makeFakeShutdownManager(shutdown),
+					appendActivePlanContext: async (systemPrompt) =>
+						`${systemPrompt}\n\n## ACTIVE PLAN (persisted)\n\n- api`,
+				}),
+			});
+		} finally {
+			stdout.restore();
+			stderr.restore();
+		}
+
+		t.true(systemContent.includes("## ACTIVE PLAN (persisted)"));
+		t.is(shutdown.code, 0);
+	},
+);
+
+test.serial(
 	"text mode recalls relevant project memories and surfaces the count on stderr",
 	async (t) => {
 		const shutdown: CapturedShutdown = { code: null };
 		const stdout = capturingStdout();
 		const stderr = capturingStderr();
-		const calls: Array<{ systemPrompt: string; query: string }> = [];
+		const calls: Array<{ query: string }> = [];
 		try {
 			await runPlainShell({
 				prompt: "refactor the auth module",
@@ -832,10 +970,10 @@ test.serial(
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt, query) => {
-						calls.push({ systemPrompt, query });
+					buildProjectContextSection: async (query) => {
+						calls.push({ query });
 						return {
-							systemPrompt: `${systemPrompt}\n\n## Project Context\n\n- Auth uses Clerk.`,
+							content: "## Project Context\n\n- Auth uses Clerk.",
 							memoryCount: 2,
 						};
 					},
@@ -875,8 +1013,8 @@ test.serial(
 						toolCalls: [],
 					}),
 					getShutdownManager: makeFakeShutdownManager(shutdown),
-					appendRelevantProjectContextWithCount: async (systemPrompt) => ({
-						systemPrompt,
+					buildProjectContextSection: async () => ({
+						content: "",
 						memoryCount: 0,
 					}),
 				}),
@@ -1472,7 +1610,7 @@ test.serial("plain shell initializes with the run's development mode", async (t)
 });
 
 test.serial(
-	"plain shell captures logWarning and logError to stderr and includes warnings in json report",
+	"plain shell captures notifyWarning and notifyError to stderr and includes warnings in json report",
 	async (t) => {
 		const stdout = capturingStdout();
 		const stderr = capturingStderr();
@@ -1484,9 +1622,9 @@ test.serial(
 				outputFormat: "json",
 				deps: baseDeps({
 					initializePlain: async () => {
-						logWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
-						logWarning("Invalid formatters config: entries need a 'command' string.");
-						logError("Plugin bad.mjs failed to load: boom from plugin");
+						notifyWarning("Invalid hooks config: unknown lifecycle event 'post-tool-uze'.");
+						notifyWarning("Invalid formatters config: entries need a 'command' string.");
+						notifyError("Plugin bad.mjs failed to load: boom from plugin");
 						return {
 							client: FAKE_CLIENT,
 							toolManager: FAKE_TOOL_MANAGER,
@@ -1553,7 +1691,7 @@ test.serial(
 				outputFormat: "json",
 				deps: baseDeps({
 					initializePlain: async () => {
-						logWarning("Some startup warning");
+						notifyWarning("Some startup warning");
 						return {
 							client: FAKE_CLIENT,
 							toolManager: FAKE_TOOL_MANAGER,

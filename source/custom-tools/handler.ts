@@ -2,10 +2,16 @@ import {spawn} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {isAbsolute, resolve} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
-import {cmdQuote, renderBody, shellQuote} from '@/custom-tools/template';
+import {
+	cmdQuote,
+	findUnsafePlaceholder,
+	renderBody,
+	shellQuote,
+} from '@/custom-tools/template';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import type {CustomToolMetadata} from '@/types/custom-tools';
-import type {ToolHandler} from '@/types/index';
-import {isRealPathInside} from '@/utils/path-validation';
+import type {ToolExecutionContext, ToolHandler} from '@/types/index';
+import {isRealPathInside} from '@/utils/fs/path-validation';
 import {signalProcessTree} from '@/utils/process-tree';
 import {isWindowsCmd, shellArgs} from '@/utils/shell-args';
 import {
@@ -13,23 +19,38 @@ import {
 	STDERR_TRUNCATION_NOTICE,
 	STDOUT_TRUNCATION_NOTICE,
 } from '@/utils/stream-collector';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
 
 /**
  * Build a `ToolHandler` that renders the script body and runs it under the
- * configured shell. Captures stdout + stderr, applies the timeout, and
- * returns the trimmed/truncated combined output.
+ * configured shell. Captures stdout + stderr, applies the timeout, honours
+ * the call's `abortSignal`, and returns the trimmed/truncated combined output.
  */
 export function buildHandler(
 	metadata: CustomToolMetadata,
 	body: string,
 	projectRoot: string,
 ): ToolHandler {
-	return async (args: Record<string, unknown>): Promise<string> => {
+	return async (
+		args: Record<string, unknown>,
+		options?: ToolExecutionContext,
+	): Promise<string> => {
 		const shell = pickShell(metadata.shell);
+		// The loader already rejects these bodies; check again here so a body
+		// that reached the handler another way still never runs unquoted values.
+		const declared = Object.keys(metadata.parameters);
+		const unsafe = findUnsafePlaceholder(
+			body,
+			isWindowsCmd(shell) ? 'cmd' : 'posix',
+			declared,
+		);
+		if (unsafe) throw new Error(`Custom tool body is unsafe: ${unsafe}`);
+		// Only declared parameters are substituted. The validator doesn't strip
+		// extra keys, and a model-supplied value for an undeclared name would
+		// otherwise fill a placeholder nobody checked, such as one in a comment.
+		const filled = applyParameterDefaults(metadata, args ?? {});
 		const rendered = renderBody(
 			body,
-			applyParameterDefaults(metadata, args ?? {}),
+			Object.fromEntries(declared.map(name => [name, filled[name]])),
 			isWindowsCmd(shell) ? cmdQuote : shellQuote,
 		);
 		const cwd = resolveCwd(metadata.cwd, projectRoot);
@@ -39,6 +60,7 @@ export function buildHandler(
 			env,
 			shell,
 			timeoutMs: metadata.timeoutMs,
+			abortSignal: options?.abortSignal,
 		});
 	};
 }
@@ -66,6 +88,8 @@ export interface RunOptions {
 	env: NodeJS.ProcessEnv;
 	shell: string;
 	timeoutMs: number;
+	/** Cancels the run: the process tree is stopped and the call rejects. */
+	abortSignal?: AbortSignal;
 }
 
 /**
@@ -76,13 +100,21 @@ export interface RunOptions {
  * the LLM can reason about it, but is NOT treated as a tool failure — many
  * CLIs (`pnpm audit`, `git diff --exit-code`, `grep`, test runners) exit
  * non-zero as part of normal operation. Throws are reserved for genuine tool
- * failures: spawn errors (command not found) and timeouts.
+ * failures: spawn errors (command not found), timeouts, and cancellation
+ * through `options.abortSignal`.
  */
 export function runScript(
 	script: string,
 	options: RunOptions,
 ): Promise<string> {
 	return new Promise((resolvePromise, rejectPromise) => {
+		const {abortSignal} = options;
+		// A call cancelled before it starts never spawns anything.
+		if (abortSignal?.aborted) {
+			rejectPromise(new Error('Custom tool was cancelled'));
+			return;
+		}
+
 		// On Unix the child leads its own process group (detached) so the whole
 		// subtree can be signalled together; a tool that backgrounds a long-lived
 		// child must not be able to outlive the shell's timeout.
@@ -101,7 +133,9 @@ export function runScript(
 		let stderr = '';
 		let settled = false;
 
-		const timer = setTimeout(() => {
+		// Shared by the timeout and the abort path: stop the whole tree and
+		// settle right away with the given error.
+		const terminate = (reason: Error) => {
 			// Drop our end of the pipes first so a detached grandchild that
 			// inherited them cannot keep them readable, then signal the whole
 			// process group.
@@ -127,19 +161,29 @@ export function runScript(
 			// Settle now rather than waiting for `exit`/`close`: neither is
 			// guaranteed to be prompt while a descendant holds an inherited
 			// pipe, and the captured output is discarded on this path anyway.
-			settle(() =>
-				rejectPromise(
-					new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
-				),
+			settle(() => rejectPromise(reason));
+		};
+
+		const timer = setTimeout(() => {
+			terminate(
+				new Error(`Custom tool timed out after ${options.timeoutMs}ms`),
 			);
 		}, options.timeoutMs);
 
+		const onAbort = () => {
+			terminate(new Error('Custom tool was cancelled'));
+		};
+		abortSignal?.addEventListener('abort', onAbort, {once: true});
+
 		// Guard every completion path: an `error`/`close` arriving after the
-		// timeout already settled must not settle the promise a second time.
+		// timeout or the abort already settled must not settle the promise a
+		// second time. The abort listener goes with the call, so a long-lived
+		// signal does not keep a reference to every finished run.
 		const settle = (finish: () => void) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			abortSignal?.removeEventListener('abort', onAbort);
 			finish();
 		};
 
@@ -254,18 +298,20 @@ const PROCESS_ENV_REF =
 
 /**
  * Expand `$VAR`, `${VAR}`, and `${VAR:-default}` references using values
- * from `process.env`. Unknown vars without a default expand to "".
+ * from `process.env`. Unknown vars without a default expand to "". As in the
+ * shell, the default also applies when the var is set but empty.
  */
 export function expandVars(value: string): string {
 	return value.replace(PROCESS_ENV_REF, (_match, braced, def, bare) => {
 		const name = braced ?? bare;
 		const v = process.env[name];
-		if (v !== undefined) return v;
-		return def ?? '';
+		if (def !== undefined && !v) return def;
+		return v ?? '';
 	});
 }
 
-function pickShell(configured: string | undefined): string {
+/** The shell a tool runs under: its `shell:` setting, else the platform default. */
+export function pickShell(configured: string | undefined): string {
 	if (configured === 'bash') return '/bin/bash';
 	if (configured === 'sh') return '/bin/sh';
 	if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';

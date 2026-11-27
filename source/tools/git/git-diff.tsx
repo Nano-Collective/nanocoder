@@ -11,7 +11,7 @@ import {useTheme} from '@/hooks/useTheme';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {execGit, truncateDiff} from './utils';
+import {execGitReadOnly, truncateDiff} from './utils';
 
 // ============================================================================
 // Types
@@ -30,7 +30,7 @@ function buildGitDiffArgs(
 	args: GitDiffInput,
 	includeStat = Boolean(args.stat),
 ): string[] {
-	const gitArgs: string[] = ['diff'];
+	const gitArgs: string[] = ['diff', '--no-ext-diff', '--no-textconv'];
 
 	if (args.staged) {
 		gitArgs.push('--cached');
@@ -41,7 +41,9 @@ function buildGitDiffArgs(
 	}
 
 	if (args.base) {
-		gitArgs.push(args.base);
+		// `--end-of-options` stops option parsing so the revision can never
+		// be reinterpreted as a flag (e.g. `--output=<file>`).
+		gitArgs.push('--end-of-options', args.base);
 	}
 
 	if (args.file) {
@@ -57,7 +59,15 @@ function buildGitDiffArgs(
 
 const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 	try {
-		const output = await execGit(buildGitDiffArgs(args));
+		// The base is passed to git as a positional argument, so a value
+		// starting with "-" would be parsed as an option (e.g. --output=<file>),
+		// letting a read-only tool write files. Reject it up front, mirroring
+		// the branch guard in git_log.
+		if (args.base?.startsWith('-')) {
+			return `Error: Invalid base: ${args.base}`;
+		}
+
+		const output = await execGitReadOnly(buildGitDiffArgs(args));
 
 		if (!output.trim()) {
 			if (args.staged) {
@@ -82,7 +92,9 @@ const executeGitDiff = async (args: GitDiffInput): Promise<string> => {
 				}
 
 				try {
-					const statOutput = await execGit(buildGitDiffArgs(args, true));
+					const statOutput = await execGitReadOnly(
+						buildGitDiffArgs(args, true),
+					);
 					return (
 						`${statOutput}\n\n` +
 						`Diff is too large to return in full (${totalLines} lines). ` +

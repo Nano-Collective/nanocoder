@@ -19,8 +19,8 @@ export interface ResolveSessionOptions {
  * against sessionManager.listSessions, then loads and returns the full Session.
  *
  * This mirrors the resolution logic that used to live inline in
- * handleResumeCommand — behavior is intentionally unchanged:
- *  - undefined arg is treated as "last" (session-handler.ts itself only calls
+ * the /resume handler — behavior is intentionally unchanged:
+ *  - undefined arg is treated as "last" (/resume in commands/resume.ts only calls
  *    this when an arg is present; the CLI entry points rely on this default).
  *  - "last" (case-insensitive): most recent session (by lastAccessedAt) in
  *    the scoped list. Empty scoped list -> {ok:false, reason:'empty'}.
@@ -31,7 +31,7 @@ export interface ResolveSessionOptions {
  *    sessionManager.loadSession, which is NOT scoped by workingDirectory —
  *    so a raw uuid resolves correctly even when `all` is false and the
  *    session belongs to a different cwd. This matches the pre-refactor
- *    behavior of handleResumeCommand.
+ *    behavior of /resume.
  */
 export async function resolveSession(
 	arg: string | undefined,

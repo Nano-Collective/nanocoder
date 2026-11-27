@@ -8,7 +8,7 @@ import {
 	validateProjectConfigSecurity,
 } from '@/config/validation';
 import type {MCPServerConfig} from '@/types/config';
-import {setGlobalMessageQueue} from '@/utils/message-queue';
+import {setGlobalMessageQueue} from '@/components/message-queue';
 
 console.log(`\nvalidation.spec.ts`);
 

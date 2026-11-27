@@ -8,6 +8,8 @@ import type {ToolCall, ToolResult} from '@/types/core';
  * Handles:
  * - Empty tool calls (missing id or function name)
  * - Tools that don't exist in the tool manager
+ * - On-demand MCP tools whose schema hasn't been loaded (the result tells the
+ *   model to call `load_tool_schema` first)
  * - Tools that exist but were not offered to the model this turn (hidden by the
  *   mode, tune profile or disabled list). The offered list only narrows what
  *   the model sees; without this check a model that names a hidden tool anyway
@@ -65,6 +67,26 @@ const partitionToolCalls = (
 			continue;
 		}
 
+		// An on-demand MCP tool is listed in the prompt's catalog but isn't
+		// registered until its schema is loaded. Say how to load it, instead of
+		// claiming that a tool the catalog lists doesn't exist.
+		if (
+			toolManager?.isUnloadedMcpTool?.(toolCall.function.name) &&
+			(availableNames
+				? availableNames.includes('load_tool_schema')
+				: toolManager.hasTool('load_tool_schema'))
+		) {
+			rejectedToolCalls.push(toolCall);
+			errorResults.push({
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: `The tool "${toolCall.function.name}" is an on-demand MCP tool whose schema is not loaded yet. Call load_tool_schema with tool_name "${toolCall.function.name}" first, then call "${toolCall.function.name}" again with arguments that match its schema.`,
+				isError: true,
+			});
+			continue;
+		}
+
 		if (toolManager && !toolManager.hasTool(toolCall.function.name)) {
 			rejectedToolCalls.push(toolCall);
 			errorResults.push(describeUnknown(toolCall));
@@ -108,8 +130,11 @@ export const filterValidToolCalls = (
 ): PartitionedToolCalls =>
 	partitionToolCalls(toolCalls, toolManager, availableNames, toolCall => {
 		// Listing the valid tool names gives small models a concrete recovery
-		// target instead of leaving them to re-guess the same wrong name.
-		const available = toolManager?.getToolNames?.() ?? [];
+		// target instead of leaving them to re-guess the same wrong name. When
+		// the caller passes the offered list, the hint uses it, so it never
+		// names a tool the next call would be refused for: one the mode, tune
+		// profile or disabled list hides, or a scoped skill tool.
+		const available = availableNames ?? toolManager?.getToolNames?.() ?? [];
 		const availableHint =
 			available.length > 0
 				? ` Available tools are: ${available.join(', ')}.`

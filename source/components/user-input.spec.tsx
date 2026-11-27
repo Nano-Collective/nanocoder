@@ -1,5 +1,5 @@
 import '../test-utils/isolated-config-dir';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -10,13 +10,12 @@ import {themes} from '../config/themes';
 import {ThemeContext} from '../hooks/useTheme';
 import {TitleShapeContext} from '../hooks/useTitleShape';
 import {UIStateProvider, useUIStateContext} from '../hooks/useUIState';
-import {clearFileListCache} from '../utils/file-autocomplete';
-import {pasteEvents} from '../utils/terminal-paste';
-import UserInput, {
-	findReverseMatch,
-	KEYBOARD_SHORTCUTS,
-	SHORTCUTS_OVERHEAD_ROWS,
-} from './user-input';
+import {clearFileListCache} from '../input/file-autocomplete';
+import {pasteEvents} from '../terminal/terminal-paste';
+import {KEYBOARD_SHORTCUTS} from './composer/keymap';
+import {SHORTCUTS_OVERHEAD_ROWS} from './composer/useShortcutsOverlay';
+import {findReverseMatch} from './composer/useReverseSearch';
+import UserInput from './user-input';
 import {getClosestConfigFile} from '../config/index';
 import {promptHistory} from '../prompt-history';
 
@@ -1427,7 +1426,7 @@ test('UserInput does not treat carriage return as a multiline shortcut', async t
 // Compact Tool Display Tests
 // ============================================================================
 
-test('UserInput shows ctrl-o expand hint when disabled with compact display on', t => {
+test('UserInput shows Ctrl+O expand hint when disabled with compact display on', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
@@ -1440,11 +1439,11 @@ test('UserInput shows ctrl-o expand hint when disabled with compact display on',
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /ctrl-o.*expand/);
+	t.regex(output!, /Ctrl\+O.*expand/);
 	unmount();
 });
 
-test('UserInput shows ctrl-o compact hint when disabled with compact display off', t => {
+test('UserInput shows Ctrl+O compact hint when disabled with compact display off', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput
@@ -1457,11 +1456,11 @@ test('UserInput shows ctrl-o compact hint when disabled with compact display off
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /ctrl-o.*compact/);
+	t.regex(output!, /Ctrl\+O.*compact/);
 	unmount();
 });
 
-test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not provided', t => {
+test('UserInput does not show Ctrl+O hint when onToggleCompactDisplay is not provided', t => {
 	const {lastFrame, unmount} = render(
 		<TestWrapper>
 			<UserInput disabled={true} />
@@ -1470,7 +1469,7 @@ test('UserInput does not show ctrl-o hint when onToggleCompactDisplay is not pro
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.notRegex(output!, /ctrl-o/);
+	t.notRegex(output!, /Ctrl\+O|ctrl-o/i);
 	unmount();
 });
 
@@ -1492,7 +1491,7 @@ test('UserInput renders the task badge when taskInfo is provided', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Tasks \(~2\/4 Ctrl-t\)/);
+	t.regex(output!, /Tasks \(~2\/4 Ctrl\+T\)/);
 	unmount();
 });
 
@@ -1515,7 +1514,7 @@ test('UserInput renders the task badge when disabled and taskInfo is provided', 
 
 	const output = lastFrame();
 	t.truthy(output);
-	t.regex(output!, /Tasks \(~1\/3\* Ctrl-t\)/);
+	t.regex(output!, /Tasks \(~1\/3\* Ctrl\+T\)/);
 	unmount();
 });
 
@@ -2005,6 +2004,64 @@ test('UserInput windows long slash completion lists', async t => {
 	unmount();
 });
 
+test.serial('UserInput warns about an unresolved @mention, then sends it with a note', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'unresolved-mention-'));
+	writeFileSync(join(dir, 'notes.txt'), '');
+	const cwd = process.cwd();
+	process.chdir(dir);
+	clearFileListCache();
+	t.teardown(() => {
+		process.chdir(cwd);
+		clearFileListCache();
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	const submitted: string[] = [];
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput
+				forceFocus={true}
+				onSubmit={message => {
+					submitted.push(message);
+				}}
+			/>
+		</TestWrapper>,
+	);
+
+	stdin.write('read @missing.ts');
+	await waitForFrame(lastFrame, /read @missing\.ts/);
+
+	stdin.write('\r');
+	await waitForFrame(
+		lastFrame,
+		/Could not attach @missing\.ts: file not found/,
+	);
+	t.deepEqual(submitted, [], 'the first Enter must not send the message');
+
+	// Editing the prompt clears the warning instead of letting a stale one
+	// apply to the corrected text.
+	stdin.write('x');
+	await waitForCondition(
+		() => !/Could not attach @missing\.ts/.test(stripAnsi(lastFrame() ?? '')),
+	);
+
+	stdin.write('\r');
+	await waitForFrame(
+		lastFrame,
+		/Could not attach @missing\.tsx: file not found/,
+	);
+	t.deepEqual(submitted, []);
+
+	// A second Enter on the unchanged prompt sends it, with a note so the
+	// model knows the mention was not attached.
+	stdin.write('\r');
+	await waitForCondition(() => submitted.length === 1);
+	t.true(submitted[0]!.startsWith('Note: these @file mentions'));
+	t.true(submitted[0]!.includes('- @missing.tsx: file not found'));
+	t.true(submitted[0]!.includes('read @missing.tsx'));
+	unmount();
+});
+
 test('UserInput windows long file mention lists', async t => {
 	const dir = mkdtempSync(join(tmpdir(), 'file-window-'));
 	for (let i = 1; i <= 8; i++) writeFileSync(join(dir, `zzfile${i}.txt`), '');
@@ -2041,6 +2098,69 @@ test('UserInput windows long file mention lists', async t => {
 
 	unmount();
 });
+
+// Regression (#1557): a multi-line draft taller than the terminal grew the
+// composer past the screen instead of capping its height and scrolling to
+// the cursor, pushing the box's bottom border and the mode line off screen.
+test.serial(
+	'UserInput caps a tall multi-line draft and keeps the cursor in view',
+	async t => {
+		const originalRows = process.stdout.rows;
+		process.stdout.rows = 24; // maxComposerLines = min(10, 24 - 6) = 10
+		try {
+			const lineCount = 23;
+			const draft = Array.from(
+				{length: lineCount},
+				(_, i) => `line${i}`,
+			).join('\n');
+			// Preloaded via restoreSubmittedDraft rather than typed: TextInput
+			// mounts cursor-at-end on the restored value, matching a user who
+			// just finished typing it, without stdin simulation (a single
+			// multi-line write reads as a legacy paste and collapses into a
+			// placeholder instead of literal text).
+			const restoreSubmittedDraft = {
+				id: 1,
+				inputState: {displayValue: draft, placeholderContent: {}},
+				attachments: [],
+			};
+
+			const {lastFrame, unmount} = render(
+				<TestWrapper>
+					<UserInput
+						forceFocus={true}
+						restoreSubmittedDraft={restoreSubmittedDraft}
+					/>
+				</TestWrapper>,
+			);
+			try {
+				await waitForFrame(lastFrame, /line22/);
+
+				// Rows are bordered ("│ ... │"), so isolate each row's content
+				// before checking it - a naive trim() leaves the border behind.
+				const rowContent = (line: string) =>
+					line
+						.replace(/^\s*│\s?/, '')
+						.replace(/\s*│\s*$/, '')
+						.trim();
+				const shownLines = stripAnsi(lastFrame() ?? '')
+					.split('\n')
+					.map(rowContent)
+					.filter(line => /^line\d+$/.test(line));
+
+				// All 23 lines would overflow a 24-row terminal; only the last 10
+				// (ending on the cursor's line) must render.
+				t.deepEqual(
+					shownLines,
+					Array.from({length: 10}, (_, i) => `line${i + 13}`),
+				);
+			} finally {
+				unmount();
+			}
+		} finally {
+			process.stdout.rows = originalRows;
+		}
+	},
+);
 
 test('UserInput renders completions BEFORE the mode indicator (inside the input box)', async t => {
 	const {stdin, lastFrame, unmount} = render(
@@ -2817,4 +2937,80 @@ test('UserInput leaves Ctrl+G alone so voice push-to-talk keeps working', async 
 
 	t.is(toggles, 0);
 	unmount();
+});
+
+// --- The `?` legend covers every bound key ---
+
+// Ctrl+<letter> bindings handled by the composer and the app around it. A new
+// `key.ctrl && input === 'x'` check, or a `ctrl('x')` binding in the
+// composer keymap, without a legend row fails here.
+const LEGEND_SOURCES = [
+	'./user-input.tsx',
+	'./composer/keymap.ts',
+	'../app/App.tsx',
+	'../app/sections/interactive-app.tsx',
+];
+
+test('every Ctrl binding in the composer and app is in the ? legend', t => {
+	const legend = KEYBOARD_SHORTCUTS.map(([keybind]) => keybind).join(' ');
+	const bound = new Set<string>();
+	for (const file of LEGEND_SOURCES) {
+		const code = readFileSync(new URL(file, import.meta.url), 'utf8');
+		for (const [, direct, viaKeymap] of code.matchAll(
+			/key\.ctrl && (?:inputChar|input) === '([a-z])'|\bctrl\('([a-z])'\)/g,
+		)) {
+			bound.add((direct ?? viaKeymap)!);
+		}
+	}
+
+	t.true(bound.size >= 10, `only found ${bound.size} bindings`);
+	for (const letter of bound) {
+		t.true(
+			legend.includes(`Ctrl+${letter.toUpperCase()}`),
+			`Ctrl+${letter.toUpperCase()} is bound but missing from KEYBOARD_SHORTCUTS`,
+		);
+	}
+});
+
+test('the composer dispatches its Ctrl bindings through the keymap', t => {
+	// A raw check in user-input.tsx would bypass COMPOSER_BINDINGS, which is
+	// what generates the legend and its coverage checks.
+	const code = readFileSync(new URL('./user-input.tsx', import.meta.url), 'utf8');
+	t.notRegex(code, /key\.ctrl && inputChar === '[a-z]'/);
+});
+
+test('the ? legend lists the non-Ctrl bindings users asked about', t => {
+	const legend = KEYBOARD_SHORTCUTS.map(row => row.join(' ')).join('\n');
+	t.regex(legend, /PgUp \/ PgDn/);
+	t.regex(legend, /wheel/);
+	t.regex(legend, /queued message/);
+	t.regex(legend, /Delete/);
+	t.regex(legend, /Esc.*back to your prompt/);
+});
+
+// Files that show a key hint on screen. Each must write keys the way the
+// legend does (`Ctrl+X`), not as `ctrl-x` or `Ctrl-x`.
+const KEY_HINT_SOURCES = [
+	'./status-bar.tsx',
+	'./user-input.tsx',
+	'./composer/attachment-pills.tsx',
+	'./composer/command-completion-list.tsx',
+	'./composer/file-mention-list.tsx',
+	'./composer/reverse-search-prompt.tsx',
+	'./composer/shortcuts-overlay.tsx',
+];
+
+test('the ? legend and on-screen hints write keys as Ctrl+X, never Ctrl-x', t => {
+	for (const [keybind] of KEYBOARD_SHORTCUTS) {
+		t.notRegex(keybind, /Ctrl-/i);
+	}
+	for (const file of KEY_HINT_SOURCES) {
+		const code = readFileSync(new URL(file, import.meta.url), 'utf8');
+		t.notRegex(code, /ctrl-[a-z]/i, `${file} writes a key as ctrl-x`);
+	}
+});
+
+test('every ? legend row has a unique key', t => {
+	const keys = KEYBOARD_SHORTCUTS.map(([keybind]) => keybind);
+	t.is(new Set(keys).size, keys.length);
 });

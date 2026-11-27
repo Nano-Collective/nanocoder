@@ -112,6 +112,83 @@ test('mlx-server template: uses default baseUrl when empty', t => {
 	t.is(config.baseUrl, 'http://localhost:8080/v1');
 });
 
+test('rapid-mlx template: is present with expected fields and defaults', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'rapid-mlx');
+	t.truthy(template);
+	t.is(template!.name, 'Rapid-MLX');
+
+	const providerNameField = template!.fields.find(
+		f => f.name === 'providerName',
+	);
+	const baseUrlField = template!.fields.find(f => f.name === 'baseUrl');
+	const modelField = template!.fields.find(f => f.name === 'model');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+
+	t.is(providerNameField?.default, 'Rapid-MLX');
+	t.true(providerNameField?.required);
+	t.is(baseUrlField?.default, 'http://localhost:8000/v1');
+	t.is(baseUrlField?.validator?.('http://localhost:8000/v1'), undefined);
+	t.truthy(baseUrlField?.validator?.('not-a-url'));
+	t.true(modelField?.required);
+	t.is(modelField?.default, '');
+	t.is(apiKeyField, undefined);
+});
+
+test('rapid-mlx template: builds config with default and custom baseUrl and no apiKey', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'rapid-mlx');
+	t.truthy(template);
+
+	const defaultConfig = template!.buildConfig({
+		providerName: '',
+		baseUrl: '',
+		model: 'mlx-community/Qwen3.5-4B-MLX-4bit',
+	});
+
+	t.deepEqual(defaultConfig, {
+		name: 'Rapid-MLX',
+		baseUrl: 'http://localhost:8000/v1',
+		models: ['mlx-community/Qwen3.5-4B-MLX-4bit'],
+	});
+	t.is(defaultConfig.apiKey, undefined);
+	t.false('apiKey' in defaultConfig);
+
+	const customConfig = template!.buildConfig({
+		providerName: 'Rapid-MLX Local',
+		baseUrl: 'http://127.0.0.1:9000/v1',
+		model: 'qwen3.5-4b-4bit',
+	});
+
+	t.deepEqual(customConfig, {
+		name: 'Rapid-MLX Local',
+		baseUrl: 'http://127.0.0.1:9000/v1',
+		models: ['qwen3.5-4b-4bit'],
+	});
+	t.is(customConfig.apiKey, undefined);
+});
+
+test('rapid-mlx template: parses comma-separated models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'rapid-mlx');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Rapid-MLX',
+		baseUrl: 'http://localhost:8000/v1',
+		model: 'mlx-community/Qwen3.5-4B-MLX-4bit,  qwen3.5-4b-4bit , ',
+	});
+
+	t.deepEqual(config.models, [
+		'mlx-community/Qwen3.5-4B-MLX-4bit',
+		'qwen3.5-4b-4bit',
+	]);
+	t.is(config.apiKey, undefined);
+});
+
+test('custom template: says the API key is optional only for local servers', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
+	const apiKey = template?.fields.find(field => field.name === 'apiKey');
+	t.regex(apiKey?.prompt ?? '', /optional for local servers/i);
+});
+
 test('custom template: single model', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'custom');
 	t.truthy(template);
@@ -461,6 +538,148 @@ test('atlas-cloud template: uses default provider name when empty', t => {
 	t.is(config.name, 'Atlas Cloud');
 });
 
+test('gmi-cloud template: builds an OpenAI-compatible provider config', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gmi-cloud');
+	t.is(template?.name, 'GMI Cloud');
+
+	t.deepEqual(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'vendor/chat-model, another-vendor/another-model',
+		}),
+		{
+			name: 'GMI Cloud',
+			baseUrl: 'https://api.gmi-serving.com/v1',
+			apiKey: 'test-key',
+			models: ['vendor/chat-model', 'another-vendor/another-model'],
+		},
+	);
+});
+
+test('gmi-cloud template: requires a masked API key and has no model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'gmi-cloud');
+	const keyField = template?.fields.find(field => field.name === 'apiKey');
+	const modelField = template?.fields.find(field => field.name === 'model');
+
+	t.true(keyField?.required);
+	t.true(keyField?.sensitive);
+	t.is(keyField?.default, undefined);
+	t.true(modelField?.required);
+	t.is(modelField?.default, '');
+});
+
+test('popnow template: sets baseUrl and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'PopNow',
+		apiKey: 'test-key',
+		model: 'deepseek/v4-flash/chat, moonshot/kimi-k3/chat',
+	});
+
+	t.is(config.name, 'PopNow');
+	t.is(config.baseUrl, 'https://api.popnow.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.deepEqual(config.models, [
+		'deepseek/v4-flash/chat',
+		'moonshot/kimi-k3/chat',
+	]);
+});
+
+test('popnow template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'popnow');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'deepseek/v4-flash/chat');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek/v4-flash/chat',
+	});
+
+	t.is(config.name, 'PopNow');
+});
+
+test('runcrate template: sets baseUrl, default model, and parses models', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'runcrate');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'Runcrate',
+		apiKey: 'test-key',
+		model: 'deepseek-ai/DeepSeek-V4.1-Flash, zai-org/GLM-5.3',
+	});
+
+	t.is(config.name, 'Runcrate');
+	t.is(config.baseUrl, 'https://api.runcrate.ai/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, [
+		'deepseek-ai/DeepSeek-V4.1-Flash',
+		'zai-org/GLM-5.3',
+	]);
+});
+
+test('runcrate template: uses default provider name and model default', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'runcrate');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'deepseek-ai/DeepSeek-V4.1-Flash');
+
+	const config = template!.buildConfig({
+		providerName: '',
+		apiKey: 'test-key',
+		model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+	});
+
+	t.is(config.name, 'Runcrate');
+});
+
+// ============================================================================
+// Tests for template ID vs sdkProvider collision prevention
+// Providers that use sdkProvider: 'anthropic' (like MiniMax, Kimi) must not
+// be confused with the Anthropic Claude template during edit lookups.
+// ============================================================================
+
+test('cloudgpu template: uses fixed endpoint and parses model IDs', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const config = template!.buildConfig({
+		providerName: 'CloudGPU',
+		apiKey: 'test-key',
+		model: 'kimi-k3, glm-5.2',
+	});
+
+	t.is(config.baseUrl, 'https://cloudgpu.app/v1');
+	t.is(config.apiKey, 'test-key');
+	t.is(config.sdkProvider, undefined);
+	t.deepEqual(config.models, ['kimi-k3', 'glm-5.2']);
+});
+
+test('cloudgpu template: uses default provider name and model', t => {
+	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cloudgpu');
+	t.truthy(template);
+
+	const modelField = template!.fields.find(f => f.name === 'model');
+	t.is(modelField?.default, 'kimi-k3');
+	const apiKeyField = template!.fields.find(f => f.name === 'apiKey');
+	t.is(apiKeyField?.prompt, 'API Key (from cloudgpu.app/api/console)');
+	t.is(
+		template!.buildConfig({
+			providerName: '',
+			apiKey: 'test-key',
+			model: 'kimi-k3',
+		}).name,
+		'CloudGPU',
+	);
+});
+
 test('together template: sets baseUrl and parses models', t => {
 	const template = PROVIDER_TEMPLATES.find(t => t.id === 'together');
 	t.truthy(template);
@@ -538,169 +757,6 @@ test('requesty template: uses default provider name and model default', t => {
 	});
 
 	t.is(config.name, 'Requesty');
-});
-
-test('orcarouter template: sets baseUrl, default model, and parses models', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'orcarouter');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		providerName: 'OrcaRouter',
-		apiKey: 'test-key',
-		model: 'openai/gpt-5.5, anthropic/claude-sonnet-5',
-	});
-
-	t.is(config.name, 'OrcaRouter');
-	t.is(config.baseUrl, 'https://api.orcarouter.ai/v1');
-	t.is(config.apiKey, 'test-key');
-	t.is(config.sdkProvider, undefined);
-	t.deepEqual(config.models, [
-		'openai/gpt-5.5',
-		'anthropic/claude-sonnet-5',
-	]);
-});
-
-test('orcarouter template: uses default provider name and model default', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'orcarouter');
-	t.truthy(template);
-
-	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'openai/gpt-6.1-sol');
-
-	const config = template!.buildConfig({
-		providerName: '',
-		apiKey: 'test-key',
-		model: 'openai/gpt-5.5',
-	});
-
-	t.is(config.name, 'OrcaRouter');
-});
-
-test('cheaper-inference template: sets baseUrl, default model, and parses models', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cheaper-inference');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		providerName: 'Cheaper Inference',
-		apiKey: 'test-key',
-		model: 'claude-sonnet-5, deepseek-v4.1-flash',
-	});
-
-	t.is(config.name, 'Cheaper Inference');
-	t.is(config.baseUrl, 'https://api.cheaperinference.com/v1');
-	t.is(config.apiKey, 'test-key');
-	t.is(config.sdkProvider, undefined);
-	t.deepEqual(config.models, ['claude-sonnet-5', 'deepseek-v4.1-flash']);
-});
-
-test('cheaper-inference template: uses default provider name and model default', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'cheaper-inference');
-	t.truthy(template);
-
-	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'claude-sonnet-5');
-
-	const config = template!.buildConfig({
-		providerName: '',
-		apiKey: 'test-key',
-		model: 'claude-sonnet-5',
-	});
-
-	t.is(config.name, 'Cheaper Inference');
-});
-
-test('api-route template: uses fixed endpoint and parses model IDs', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'api-route');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		providerName: 'API Route',
-		apiKey: 'test-key',
-		model: 'gpt-5.5, claude-sonnet-4-6',
-	});
-
-	t.is(config.baseUrl, 'https://global.api-route.com/v1');
-	t.is(config.apiKey, 'test-key');
-	t.is(config.sdkProvider, undefined);
-	t.deepEqual(config.models, ['gpt-5.5', 'claude-sonnet-4-6']);
-});
-
-test('api-route template: uses default provider name and model', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'api-route');
-	t.truthy(template);
-
-	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'gpt-6.1-sol');
-	t.is(template!.buildConfig({providerName: '', apiKey: 'test-key', model: 'gpt-5.5'}).name, 'API Route');
-});
-
-test('futureinfra template: sets baseUrl, default model, and parses models', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'futureinfra');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		providerName: 'FutureInfra',
-		apiKey: 'test-key',
-		model: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4',
-	});
-
-	t.is(config.name, 'FutureInfra');
-	t.is(config.baseUrl, 'https://futureinfra.ai/v1/ai');
-	t.is(config.apiKey, 'test-key');
-	t.is(config.sdkProvider, undefined);
-	t.deepEqual(config.models, [
-		'openai/gpt-4o-mini',
-		'anthropic/claude-sonnet-4',
-	]);
-});
-
-test('futureinfra template: uses default provider name and model default', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'futureinfra');
-	t.truthy(template);
-
-	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'openai/gpt-6.1-sol');
-
-	const config = template!.buildConfig({
-		providerName: '',
-		apiKey: 'test-key',
-		model: 'openai/gpt-4o-mini',
-	});
-
-	t.is(config.name, 'FutureInfra');
-});
-
-test('opper template: sets baseUrl, default model, and parses models', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'opper');
-	t.truthy(template);
-
-	const config = template!.buildConfig({
-		providerName: 'Opper',
-		apiKey: 'test-key',
-		model: 'claude-sonnet-4-6, gpt-5.5',
-	});
-
-	t.is(config.name, 'Opper');
-	t.is(config.baseUrl, 'https://api.opper.ai/v3/compat');
-	t.is(config.apiKey, 'test-key');
-	t.is(config.sdkProvider, undefined);
-	t.deepEqual(config.models, ['claude-sonnet-4-6', 'gpt-5.5']);
-});
-
-test('opper template: uses default provider name and model default', t => {
-	const template = PROVIDER_TEMPLATES.find(t => t.id === 'opper');
-	t.truthy(template);
-
-	const modelField = template!.fields.find(f => f.name === 'model');
-	t.is(modelField?.default, 'claude-sonnet-4-6');
-
-	const config = template!.buildConfig({
-		providerName: '',
-		apiKey: 'test-key',
-		model: 'claude-sonnet-4-6',
-	});
-
-	t.is(config.name, 'Opper');
 });
 
 // ============================================================================

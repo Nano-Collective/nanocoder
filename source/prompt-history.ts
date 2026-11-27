@@ -2,9 +2,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import {getClosestConfigFile} from '@/config/index';
 import {MAX_PROMPT_HISTORY_SIZE} from '@/constants';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
-import {logError} from '@/utils/message-queue';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {notifyError} from '@/utils/message-queue-core';
 import type {InputState} from './types/hooks';
 
 const ENTRY_SEPARATOR = '\n---ENTRY_SEPARATOR---\n';
@@ -150,7 +150,7 @@ export class PromptHistory {
 			// do not save: that would replace entries we never saw. Fixing the
 			// cause brings the history back on the next load.
 			this.persistenceBlocked = true;
-			logError(
+			notifyError(
 				`Prompt history could not be read, leaving it untouched and not saving it this session: ${formatError(error)}`,
 			);
 		}
@@ -192,13 +192,18 @@ export class PromptHistory {
 	 */
 	private async quarantineCorruptFile(error: unknown): Promise<void> {
 		const backupPath = await this.nextAvailableBackupPath();
-		logError(
+		notifyError(
 			`Prompt history file is corrupt, backing it up to ${backupPath}: ${formatError(error)}`,
 		);
 		try {
 			await fs.rename(this.historyFile, backupPath);
+			try {
+				await fs.chmod(backupPath, 0o600);
+			} catch {
+				// Best effort on filesystems/platforms without POSIX permissions.
+			}
 		} catch (renameError) {
-			logError(
+			notifyError(
 				`Failed to back up corrupt prompt history: ${formatError(renameError)}`,
 			);
 		}
@@ -225,20 +230,14 @@ export class PromptHistory {
 
 	/**
 	 * Where to write: the real file behind a symlink (a renamed-over link would
-	 * be replaced by a plain file and leave its target stale), and the mode the
-	 * existing file has, if any.
+	 * be replaced by a plain file and leave its target stale).
 	 */
-	private async resolveWriteTarget(): Promise<{path: string; mode?: number}> {
-		let path = this.historyFile;
+	private async resolveWriteTarget(): Promise<string> {
 		try {
-			path = await fs.realpath(this.historyFile);
+			return await fs.realpath(this.historyFile);
 		} catch {
 			// Not there yet: write the path as given.
-		}
-		try {
-			return {path, mode: (await fs.stat(path)).mode & 0o777};
-		} catch {
-			return {path};
+			return this.historyFile;
 		}
 	}
 
@@ -254,18 +253,17 @@ export class PromptHistory {
 				// truncates in place, so a crash mid-save used to leave a file
 				// starting with the marker followed by broken JSON, which the
 				// next load discarded. Rename replaces whatever is at the path,
-				// so write to the real file behind a symlink and give the new
-				// file the old one's permissions, as an in-place write would.
+				// so write to the real file behind a symlink. Prompts and pasted
+				// content can contain credentials, so every saved file is owner-only,
+				// including files created with a more permissive mode by older versions.
 				const target = await this.resolveWriteTarget();
-				await atomicWriteFile(
-					target.path,
-					JSON_FORMAT_MARKER + jsonContent,
-					target.mode === undefined ? undefined : {mode: target.mode},
-				);
+				await atomicWriteFile(target, JSON_FORMAT_MARKER + jsonContent, {
+					mode: 0o600,
+				});
 			} catch (error) {
 				// Silently fail to avoid disrupting the user experience
 				const errorMessage = formatError(error);
-				logError(`Failed to save prompt history: ${errorMessage}`);
+				notifyError(`Failed to save prompt history: ${errorMessage}`);
 			}
 		});
 		return this.savePromise;

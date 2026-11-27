@@ -1,7 +1,7 @@
 import {Box, Text} from 'ink';
 import {useTheme} from '@/hooks/useTheme';
+import {formatRelativeTime} from '@/services/checkpoint-utils';
 import type {CheckpointListItem} from '@/types/checkpoint';
-import {formatRelativeTime} from '@/utils/checkpoint-utils';
 
 interface CheckpointListDisplayProps {
 	checkpoints: CheckpointListItem[];

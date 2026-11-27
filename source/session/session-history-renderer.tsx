@@ -4,13 +4,17 @@ import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import AssistantMessage from '@/components/assistant-message';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {InfoMessage} from '@/components/message-box';
+import {ReviewActivity} from '@/components/review-activity';
 import UserMessage from '@/components/user-message';
 import {getShowUsageFooter} from '@/config/preferences';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
-import {generateKey} from '@/session/key-generator';
+import {readPersistedReview} from '@/review/review-session';
+import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import type {Message, ToolCall} from '@/types/core';
-import {parseToolArguments} from '@/utils/tool-args-parser';
+import {generateKey} from '@/utils/key-generator';
+import {truncateText} from '@/utils/truncate-text';
+import {stripTurnContext} from '@/utils/turn-context';
 
 /**
  * Cap on how many trailing messages are replayed into scrollback on resume.
@@ -24,8 +28,9 @@ const MAX_REPLAYED_MESSAGES = 60;
 const MAX_DESCRIPTOR_LENGTH = 80;
 
 function truncate(value: string, max = MAX_DESCRIPTOR_LENGTH): string {
-	const single = value.replace(/\s+/g, ' ').trim();
-	return single.length > max ? `${single.slice(0, max - 1)}…` : single;
+	return truncateText(value.replace(/\s+/g, ' ').trim(), max, {
+		unit: 'code-units',
+	});
 }
 
 /**
@@ -175,18 +180,43 @@ export function buildSessionHistoryComponents(
 
 	for (const message of replayed) {
 		switch (message.role) {
-			case 'user':
-				if (message.content.trim()) {
+			case 'user': {
+				// Per-turn context is harness-authored, never something the user
+				// typed, so scrollback shows the message without it. The stored
+				// message keeps the block — that is what keeps the replayed
+				// prefix identical to what was originally sent.
+				const userContent = stripTurnContext(message.content);
+				if (userContent.trim()) {
 					components.push(
 						<UserMessage
 							key={generateKey('resume-user')}
-							message={message.content}
+							message={userContent}
 						/>,
 					);
 				}
 				break;
+			}
 
 			case 'assistant': {
+				const review = readPersistedReview(message);
+				if (review) {
+					components.push(
+						<ReviewActivity
+							key={generateKey('resume-review-activity')}
+							summary={review.activity}
+							title={`${review.tier} review`}
+							recentCount={0}
+							outcome={review.status}
+						/>,
+						<AssistantMessage
+							key={generateKey('resume-review-report')}
+							message={message.content}
+							model={model}
+							showUsageFooter={false}
+						/>,
+					);
+					break;
+				}
 				if (message.reasoning?.trim()) {
 					components.push(
 						<AssistantReasoning

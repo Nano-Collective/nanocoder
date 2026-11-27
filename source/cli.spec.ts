@@ -6,6 +6,8 @@ import {
 	parseRunPrompt,
 	RUN_FLAGS_STANDALONE,
 	RUN_FLAGS_WITH_VALUES,
+	wantsHelp,
+	wantsVersion,
 } from './run-prompt-args.js';
 
 // Test CLI argument parsing for non-interactive mode
@@ -109,61 +111,48 @@ test('CLI parsing: filters out flags mixed with prompt words', t => {
 	t.is(prompt, 'create a file');
 });
 
-// New tests for version and help flags
-test('CLI parsing: detects --version flag', t => {
-	const args = ['--version'];
-	const hasVersionFlag = args.includes('--version') || args.includes('-v');
-
-	t.true(hasVersionFlag);
+// The version and help fast paths, tested through the helpers cli.tsx calls.
+// These used to assert `args.includes(...)` on a local array, which exercised
+// no CLI code and described the whole-argv rule cli.tsx no longer uses.
+test('CLI parsing: detects --version and -v', t => {
+	t.true(wantsVersion(['--version']));
+	t.true(wantsVersion(['-v']));
 });
 
-test('CLI parsing: detects -v flag', t => {
-	const args = ['-v'];
-	const hasVersionFlag = args.includes('--version') || args.includes('-v');
-
-	t.true(hasVersionFlag);
+test('CLI parsing: detects --help and -h', t => {
+	t.true(wantsHelp(['--help']));
+	t.true(wantsHelp(['-h']));
 });
 
-test('CLI parsing: detects --help flag', t => {
-	const args = ['--help'];
-	const hasHelpFlag = args.includes('--help') || args.includes('-h');
-
-	t.true(hasHelpFlag);
+test('CLI parsing: version and help flags before run still win', t => {
+	t.true(wantsVersion(['--version', '--vscode', 'run', 'some', 'command']));
+	t.true(wantsHelp(['--help', '--vscode', 'run', 'some', 'command']));
 });
 
-test('CLI parsing: detects -h flag', t => {
-	const args = ['-h'];
-	const hasHelpFlag = args.includes('--help') || args.includes('-h');
-
-	t.true(hasHelpFlag);
+test('CLI parsing: version and help flags mixed with other options', t => {
+	t.true(wantsVersion(['--vscode', '-v', '--vscode-port', '3000']));
+	t.true(wantsHelp(['--vscode', '-h', '--vscode-port', '3000']));
 });
 
-test('CLI parsing: version flag takes precedence over other arguments', t => {
-	const args = ['--version', '--vscode', 'run', 'some', 'command'];
-	const hasVersionFlag = args.includes('--version') || args.includes('-v');
-
-	t.true(hasVersionFlag);
+test('CLI parsing: -v, -h, --version and --help inside the run prompt are prompt text', t => {
+	t.false(wantsVersion(['run', 'go', 'test', '-v']));
+	t.false(wantsVersion(['run', 'node', '--version']));
+	t.false(wantsHelp(['run', 'explain', 'grep', '-h']));
+	t.false(wantsHelp(['run', 'what', 'does', '--help', 'print']));
 });
 
-test('CLI parsing: help flag takes precedence over other arguments', t => {
-	const args = ['--help', '--vscode', 'run', 'some', 'command'];
-	const hasHelpFlag = args.includes('--help') || args.includes('-h');
-
-	t.true(hasHelpFlag);
+test('CLI parsing: run --help alone still prints help', t => {
+	t.true(wantsHelp(['run', '--help']));
+	t.true(wantsHelp(['run', '-h']));
+	t.true(wantsHelp(['--vscode', 'run', '-h']));
+	t.false(wantsVersion(['run', '--version']));
 });
 
-test('CLI parsing: detects version flag with other arguments', t => {
-	const args = ['--vscode', '-v', '--vscode-port', '3000'];
-	const hasVersionFlag = args.includes('--version') || args.includes('-v');
-
-	t.true(hasVersionFlag);
-});
-
-test('CLI parsing: detects help flag with other arguments', t => {
-	const args = ['--vscode', '-h', '--vscode-port', '3000'];
-	const hasHelpFlag = args.includes('--help') || args.includes('-h');
-
-	t.true(hasHelpFlag);
+test('CLI parsing: no flags means no fast path', t => {
+	t.false(wantsVersion([]));
+	t.false(wantsHelp([]));
+	t.false(wantsHelp(['run']));
+	t.false(wantsHelp(['run', 'hello']));
 });
 
 // --context-max flag tests
@@ -638,28 +627,99 @@ test('CLI parsing: handles --mode before run command', t => {
 	t.is(prompt, 'audit module');
 });
 
+test('CLI parsing: handles --profile before run command', t => {
+	const args = ['--profile', 'fast', 'run', 'analyze', 'code'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'analyze code');
+});
+
+test('CLI parsing: handles --profile=<name> before run command', t => {
+	const args = ['--profile=fast', 'run', 'analyze', 'code'];
+	const prompt = parsePrompt(args);
+	t.is(prompt, 'analyze code');
+});
+
+// Profile argument extraction — mirrors the parser in cli.tsx
+function parseProfileArg(args: string[]): {
+	profile?: string;
+	error?: string;
+} {
+	const profileArgIndex = args.findIndex(
+		arg => arg === '--profile' || arg.startsWith('--profile='),
+	);
+	if (profileArgIndex === -1) {
+		return {};
+	}
+	const profileValue = args[profileArgIndex].startsWith('--profile=')
+		? args[profileArgIndex].slice('--profile='.length)
+		: args[profileArgIndex + 1];
+	if (!profileValue || profileValue.startsWith('-')) {
+		return {error: '--profile requires a profile name.'};
+	}
+	return {profile: profileValue.trim()};
+}
+
+test('CLI parsing: extracts --profile <name>', t => {
+	const result = parseProfileArg(['--profile', 'fast']);
+	t.is(result.profile, 'fast');
+	t.is(result.error, undefined);
+});
+
+test('CLI parsing: extracts --profile=<name>', t => {
+	const result = parseProfileArg(['--profile=review']);
+	t.is(result.profile, 'review');
+	t.is(result.error, undefined);
+});
+
+test('CLI parsing: errors on --profile without value', t => {
+	const result = parseProfileArg(['--profile']);
+	t.is(result.profile, undefined);
+	t.is(result.error, '--profile requires a profile name.');
+});
+
+test('CLI parsing: errors on --profile followed by another flag', t => {
+	const result = parseProfileArg(['--profile', '--plain']);
+	t.is(result.profile, undefined);
+	t.is(result.error, '--profile requires a profile name.');
+});
+
+test('CLI parsing: errors on empty --profile=', t => {
+	const result = parseProfileArg(['--profile=']);
+	t.is(result.profile, undefined);
+	t.is(result.error, '--profile requires a profile name.');
+});
+
 // Review guard tests — mirrors the guards in cli.tsx
 function resolveReviewGuards(opts: {
 	args: string[];
 	stdoutIsTTY: boolean;
 	outputFormat: string;
-}): {ttyError: boolean; jsonError: boolean; collisionError: boolean} {
+}): {
+	ttyError: boolean;
+	jsonError: boolean;
+	collisionError: boolean;
+	headless: boolean;
+} {
 	const {args, stdoutIsTTY, outputFormat} = opts;
 	const isRunCommand = args.indexOf('run') !== -1;
 	const isReviewCommand = args[0] === 'review';
-	const ttyError = isReviewCommand && !stdoutIsTTY;
-	const jsonError = isReviewCommand && outputFormat === 'json';
+	const ciDetected = false;
+	const headless =
+		isReviewCommand &&
+		(outputFormat === 'json' || !stdoutIsTTY || ciDetected);
+	const jsonError = false;
 	const collisionError = isRunCommand && isReviewCommand;
-	return {ttyError, jsonError, collisionError};
+	return {ttyError: false, jsonError, collisionError, headless};
 }
 
-test('review guard: errors when stdout is not a TTY', t => {
-	const {ttyError} = resolveReviewGuards({
+test('review guard: a non-TTY review runs headless instead of refusing', t => {
+	const {headless, ttyError} = resolveReviewGuards({
 		args: ['review', 'main'],
 		stdoutIsTTY: false,
 		outputFormat: 'text',
 	});
-	t.true(ttyError);
+	t.true(headless);
+	t.false(ttyError);
 });
 
 test('review guard: passes on a TTY', t => {
@@ -671,13 +731,14 @@ test('review guard: passes on a TTY', t => {
 	t.false(ttyError);
 });
 
-test('review guard: --json is rejected with review', t => {
-	const {jsonError} = resolveReviewGuards({
+test('review guard: --json selects the headless review', t => {
+	const {jsonError, headless} = resolveReviewGuards({
 		args: ['review', 'main'],
 		stdoutIsTTY: true,
 		outputFormat: 'json',
 	});
-	t.true(jsonError);
+	t.false(jsonError);
+	t.true(headless);
 });
 
 test('review guard: --json is not rejected with run', t => {

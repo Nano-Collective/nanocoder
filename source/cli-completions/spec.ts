@@ -119,6 +119,12 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 
 export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
+		name: 'profile',
+		takesValue: true,
+		valueName: 'name',
+		description: 'Use a named configuration profile from agents.config.json',
+	},
+	{
 		name: 'provider',
 		takesValue: true,
 		valueName: 'provider',
@@ -136,7 +142,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		takesValue: true,
 		valueName: 'limit',
 		description:
-			'Set maximum context length in tokens (supports k/K suffix, e.g. 128k)',
+			'Set maximum context length in tokens (supports k/K and m/M suffixes, e.g. 128k or 1m)',
 	},
 	{
 		name: 'mode',
@@ -151,7 +157,8 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
 		name: 'trust-directory',
 		takesValue: false,
-		description: 'Skip the first-run directory trust prompt (run mode only)',
+		description:
+			'Skip the first-run directory trust prompt (run, review, daemon start)',
 	},
 	{
 		name: 'plain',
@@ -192,14 +199,22 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
 		name: 'json',
 		takesValue: false,
-		description: 'Output execution results as JSON (run mode only)',
+		description: 'Output execution results as JSON (run and review only)',
 	},
 	{
 		name: 'output-format',
 		takesValue: true,
 		valueName: 'format',
 		values: ['text', 'json'],
-		description: "Specify stdout format ('text' or 'json', run mode only)",
+		description:
+			"Specify stdout format ('text' or 'json', run and review only)",
+	},
+	{
+		name: 'json-schema',
+		takesValue: true,
+		valueName: 'file|json',
+		description:
+			'Validate the run answer against a JSON Schema (file or inline JSON)',
 	},
 	{
 		name: 'acp',
@@ -210,7 +225,7 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 	{
 		name: 'vscode',
 		takesValue: false,
-		description: 'Run in VS Code mode',
+		description: 'Start the legacy VS Code companion (deprecated)',
 	},
 	{
 		name: 'vscode-port',

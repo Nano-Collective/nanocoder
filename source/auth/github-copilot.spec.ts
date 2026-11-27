@@ -1,8 +1,12 @@
 import test from 'ava';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   getCopilotUrls,
   getCopilotBaseUrl,
   getCopilotAccessToken,
+  runCopilotLoginFlow,
 } from './github-copilot.js';
 
 test('getCopilotUrls returns correct URLs for github.com', t => {
@@ -86,4 +90,50 @@ test('getCopilotAccessToken refetches when cached token is expired', async t => 
 
   t.is(fetchCallCount, 2, 'fetch must be called twice; expired cache should not be used');
   t.not(result1.token, result2.token, 'second call should return a new token');
+});
+
+test.serial('runCopilotLoginFlow waits longer and keeps polling on slow_down', async t => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocoder-copilot-login-'));
+  const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
+  process.env.NANOCODER_CONFIG_DIR = configDir;
+  const pollTimes: number[] = [];
+  const responses: unknown[] = [
+    {
+      device_code: 'dev',
+      user_code: 'ABCD-1234',
+      verification_uri: 'https://github.com/login/device',
+      interval: 1,
+    },
+    {error: 'slow_down', interval: 2},
+    {access_token: 'gho_token'},
+  ];
+  const mockFetch = async () => {
+    if (responses.length < 3) {
+      pollTimes.push(Date.now());
+    }
+    return {ok: true, json: async () => responses.shift()} as Response;
+  };
+
+  try {
+    await runCopilotLoginFlow('verify-copilot', {
+      onShowCode: () => {},
+      fetchFn: mockFetch as typeof fetch,
+    });
+    t.is(pollTimes.length, 2, 'the poll must continue after slow_down');
+    t.true(
+      pollTimes[1] - pollTimes[0] >= 1900,
+      'the next poll must wait for the interval from the slow_down response',
+    );
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(configDir, 'copilot-credentials.json'), 'utf8'),
+    );
+    t.is(saved['verify-copilot'].oauthToken, 'gho_token');
+  } finally {
+    if (originalConfigDir !== undefined) {
+      process.env.NANOCODER_CONFIG_DIR = originalConfigDir;
+    } else {
+      delete process.env.NANOCODER_CONFIG_DIR;
+    }
+    fs.rmSync(configDir, {recursive: true, force: true});
+  }
 });

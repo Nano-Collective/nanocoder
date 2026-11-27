@@ -1,4 +1,4 @@
-import {logError} from '@/utils/message-queue';
+import {notifyError} from '@/utils/message-queue-core';
 
 // Expand environment variable references in a string
 function expandEnvVar(str: string): string {
@@ -6,30 +6,37 @@ function expandEnvVar(str: string): string {
 		return str;
 	}
 
-	const regex = /\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}|\$([A-Z_][A-Z0-9_]*)/g;
+	const regex =
+		/\$\$|\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}|\$([A-Z_][A-Z0-9_]*)/g;
 
 	return str.replace(
 		regex,
 		(
-			_match: string,
+			match: string,
 			bracedVarName: string | undefined,
 			defaultValue: string | undefined,
 			unbracedVarName: string | undefined,
 		) => {
+			if (match === '$$') {
+				return '$';
+			}
+
 			const varName = bracedVarName || unbracedVarName;
 			if (!varName) return '';
 
 			const envValue = process.env[varName];
 
+			// Like the shell's `${VAR:-default}`, the default applies when VAR is
+			// unset or empty. Bare `$VAR` and `${VAR}` keep an empty value.
+			if (defaultValue !== undefined && !envValue) {
+				return defaultValue.replace(/\$\$/g, '$');
+			}
+
 			if (envValue !== undefined) {
 				return envValue;
 			}
 
-			if (defaultValue !== undefined) {
-				return defaultValue;
-			}
-
-			logError(
+			notifyError(
 				`Environment variable ${varName} not found in config, using empty string`,
 			);
 
@@ -55,6 +62,8 @@ export function substituteEnvVars<T>(value: T): T {
 	if (typeof value === 'object') {
 		const result: Record<string, unknown> = {};
 		for (const [key, val] of Object.entries(value)) {
+			// Skip __proto__ to prevent prototype pollution when parsing user JSON
+			if (key === '__proto__') continue;
 			result[key] = substituteEnvVars(val);
 		}
 

@@ -318,3 +318,174 @@ test('matchGlob: patterns authored with Windows separators', t => {
 	t.true(matchGlob('docs\\**', 'docs\\guide.md'));
 	t.false(matchGlob('docs\\*.md', 'docs/deep/guide.md'));
 });
+
+test('file.ai-comment event dispatches to matching subscription', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe({
+		id: 'ai1',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'src/code.ts',
+			comment: 'fix null check',
+			marker: 'AI!',
+			line: 10,
+			context: 'function foo() { // fix null check AI! }',
+		},
+		at: Date.now(),
+	});
+
+	t.is(d.calls.length, 1);
+	t.is(d.calls[0]?.sub.id, 'ai1');
+});
+
+test('file.ai-comment with path filter matches correctly', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe({
+		id: 'ai-src',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+		filter: {paths: ['src/**']},
+	});
+
+	// Should match
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'src/utils.ts',
+			comment: 'optimize',
+			marker: 'AI!',
+			line: 5,
+			context: '// optimize AI!',
+		},
+		at: Date.now(),
+	});
+
+	// Should not match
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'docs/readme.md',
+			comment: 'fix typo',
+			marker: 'AI?',
+			line: 1,
+			context: '<!-- fix typo AI? -->',
+		},
+		at: Date.now(),
+	});
+
+	t.is(d.calls.length, 1);
+	t.is(d.calls[0]?.event.payload.file, 'src/utils.ts');
+});
+
+test('file.ai-comment with no filter dispatches all', async t => {
+	const d = makeDispatcher();
+	const router = new EventRouter(d);
+	router.subscribe({
+		id: 'ai-all',
+		kind: 'file.ai-comment',
+		target: {kind: 'agent', name: 'fixer'},
+		source: 'frontmatter',
+		ownerSkill: 'auto-fix',
+	});
+
+	await router.emit({
+		kind: 'file.ai-comment',
+		payload: {
+			file: 'anywhere.js',
+			comment: 'refactor',
+			marker: 'AI?',
+			line: 20,
+			context: '// refactor AI?',
+		},
+		at: Date.now(),
+	});
+
+	t.is(d.calls.length, 1);
+});
+
+// A dispatch resolves only when its triggered run ends, so subscriptions on
+// one event must start together, not wait for each other.
+test('emit starts every matching subscription without waiting for the others', async t => {
+	const started: string[] = [];
+	let release: () => void = () => {};
+	const blocked = new Promise<void>(resolve => {
+		release = resolve;
+	});
+	const router = new EventRouter({
+		dispatch: async sub => {
+			started.push(sub.id);
+			if (sub.id === 'slow') await blocked;
+		},
+	});
+	router.subscribe(cronSub('slow', '0 9 * * *'));
+	router.subscribe(cronSub('fast', '0 9 * * *'));
+
+	const done = router.emit(cronEvent('0 9 * * *'));
+	await new Promise(resolve => setImmediate(resolve));
+	t.deepEqual(started, ['slow', 'fast']);
+	release();
+	await done;
+});
+
+test('one failing subscription neither skips the others nor rejects emit', async t => {
+	const dispatched: string[] = [];
+	const errors: Array<{id: string; message: string}> = [];
+	const router = new EventRouter(
+		{
+			dispatch(sub) {
+				dispatched.push(sub.id);
+				if (sub.id === 'throws') throw new Error('sync boom');
+				if (sub.id === 'rejects') return Promise.reject(new Error('async boom'));
+			},
+		},
+		(sub, _event, error) => {
+			errors.push({id: sub.id, message: (error as Error).message});
+		},
+	);
+	router.subscribe(cronSub('throws', '* * * * *'));
+	router.subscribe(cronSub('rejects', '* * * * *'));
+	router.subscribe(cronSub('ok', '* * * * *'));
+
+	await t.notThrowsAsync(router.emit(cronEvent('* * * * *')));
+	t.deepEqual(dispatched, ['throws', 'rejects', 'ok']);
+	t.deepEqual(errors, [
+		{id: 'throws', message: 'sync boom'},
+		{id: 'rejects', message: 'async boom'},
+	]);
+});
+
+// matchGlob runs on the shared utils/fs/glob-match engine.
+
+test('matchGlob keeps a trailing **/ meaning "anything under this directory"', t => {
+	t.true(matchGlob('docs/**/', 'docs/a.md'));
+	t.true(matchGlob('docs/**/', 'docs/sub/a.md'));
+	t.false(matchGlob('docs/**/', 'src/a.md'));
+	t.true(matchGlob('**/', 'a/b/c.ts'));
+});
+
+test('matchGlob stays fast on a pattern that makes a backtracking regex hang', t => {
+	const start = Date.now();
+	t.false(matchGlob(`${'*a'.repeat(25)}b`, 'a'.repeat(2000)));
+	t.false(matchGlob('**/**/**/**/**/**/x', `${'a/'.repeat(200)}y`));
+	t.true(Date.now() - start < 200);
+});
+
+test('matchGlob matches nothing for a pattern the matcher refuses, instead of throwing', t => {
+	t.false(matchGlob('a'.repeat(1001), 'a'.repeat(1001)));
+	t.false(matchGlob('{a,b}'.repeat(10), 'a'.repeat(10)));
+});
+
+test('matchGlob trims whitespace around brace alternatives', t => {
+	t.true(matchGlob('src/*.{ts, tsx}', 'src/a.tsx'));
+});

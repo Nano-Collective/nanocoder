@@ -14,50 +14,65 @@ Type `/` in the chat input to see available commands. All commands start with `/
 |---------|-------------|
 | `/help [command]` | Show available commands by category. `/help <command>` shows that command's usage, options, subcommands, aliases and examples |
 | `/init` | Initialize the project with intelligent analysis and create `AGENTS.md`. Use `/init --preset <react\|nextjs\|rust>` for bundled stack guidance, ignore patterns, and a `/check` command skill; `/init --force` regenerates `AGENTS.md`, and `/init --lean` skips merging `CLAUDE.md` |
-| `/setup-config` | Open a configuration file in your `$EDITOR` (lists project and global config files) |
+| `/setup-config` | Open a config file (`agents.config.json`, `.mcp.json`, preferences) in your `$EDITOR`; lists the project and global copies to pick from |
 | `/clear` | Clear chat history |
-| `/model` | Switch between available models from any configured provider |
+| `/model [browse]` | Switch between available models from any configured provider. `/model browse` opens the OpenRouter model browser (searchable, filterable by open/proprietary): Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
+| `/profile [name\|--clear]` | List configuration profiles, switch to a named profile, or clear the active profile (`/profile --clear`) (see [Named Configuration Profiles](../configuration/index.md#named-configuration-profiles)) |
 | `/status` | Display current status (CWD, provider, model, theme, available updates, AGENTS setup) |
 | `/tasks` | Manage task list for tracking complex work (see [Task Management](task-management.md)) |
-| `/model-database` | Browse coding models from OpenRouter (searchable, filterable by open/proprietary). Enter copies the highlighted model's ID to the clipboard and, when the active provider is OpenRouter, also switches the session to that model |
+| `/jobs` | Inspect and stop background bash jobs started with `execute_bash` `run_in_background: true`: `/jobs` lists them (id, status, runtime, command), `/jobs <id>` shows a bounded tail of the job's retained output — including text the model already read — without moving its `bash_output` cursor, `/jobs kill <id>` stops one and `/jobs kill all` stops every running job. A running-jobs count also appears in the status bar |
+| `/plans` | View and manage persistent plan graphs: `/plans` (list), `/plans show [id]`, `/plans use <id\|none>`, `/plans delete <id>` (see [Persistent Plan Graphs](persistent-plans.md)) |
 | `/settings` | Interactive settings menu. Accepts a tab name to jump straight there: `/settings providers`, `/settings mcp`, `/settings appearance`, `/settings input`, `/settings behavior`, `/settings advanced` |
-| `/firewall` | Inspect and configure the negative-space mutation firewall. Subcommands: `status`, `enable`, `disable`, `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset` |
+| `/firewall` | Guard file edits made by the model: in `strict` mode block, in `lenient` mode only warn about, edits that delete existing tests, change exported signatures, add explicit `any` types, or touch protected paths. Off by default. Subcommands: `status`, `enable` (same as `mode strict`), `disable` (same as `mode disabled`), `mode <strict\|lenient\|disabled>`, `toggle <any\|tests\|exports>`, `protect <pattern>`, `unprotect <pattern>`, `reset`. Changes last for the session; set defaults under `nanocoder.firewall` (see [Mutation Firewall](../configuration/index.md#mutation-firewall)) |
 | `/mcp` | Show connected MCP servers and their tools |
 | `/commands` | List custom commands. Subcommands: `show <name>`, `create <name>` (see [Custom Commands](custom-commands.md)) |
 | `/tools` | List available tools grouped by source (built-in, MCP, custom). Subcommand: `create <name>` (see [Custom Tools](custom-tools.md)) |
 | `/agents` | List subagents. `/agents show <name>` for details, `/agents copy <name>` to customize, `/agents create <name>` to scaffold a new one (see [Subagents](subagents.md)) |
 | `/checkpoint` | Save and restore file snapshots. Subcommands: `create`/`save [name]` (name optional, auto-generated when omitted), `list`/`ls`, `load`/`restore`, `delete`/`remove`/`rm`, `help` (see [Checkpointing](checkpointing.md)) |
 | `/compact` | Compress message history to reduce context usage. Flags include `--llm`, `--mechanical`, `--default`, `--conservative`, `--aggressive`, `--preview` and `--restore`; `--strategy`, `--threshold`, `--auto-on` and `--auto-off` only change session settings (see [Context Compression](context-compression.md)) |
-| `/context-max` | Set maximum context length for the current session (e.g. `/context-max 128k`), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
-| `/exit` | Exit the application (alias: `/quit`) |
+| `/context-max` | Set maximum context length for the current session (supports positive integer or decimal values, k/K and m/M suffixes), or inspect the resolved context source. `/context-max --reset` clears the session override. Also available as `--context-max` CLI flag |
+| `/exit` | Exit the application |
 | `/export` | Export the current session to a markdown file, or to JSON with `/export --json` or a `.json` filename (see [Exporting a Session](#exporting-a-session)) |
 | `/share` | Write the current session to a single, self-contained HTML page you can open in any browser or send to someone, with secrets redacted. `/share --json` writes the same content as deterministic JSON (see [Sharing a Session](#sharing-a-session)) |
-| `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response |
+| `/copy` | Copy the last assistant response to the system clipboard. Use `/copy code` to copy just the last fenced code block from the last response. When the system clipboard fails, and always over SSH, the text is also sent to the terminal clipboard through OSC 52; the terminal does not confirm receipt, and inside tmux you need `set -g allow-passthrough on` (and `set -g set-clipboard on` for bare sequences) |
 | `/expand [n]` | Print tool result `n` in full. Long tool output is cut to 20 lines with a `/expand n` hint; run `/expand` without a number to list recent results |
-| `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard. A spinner shows while the model is working |
-| `/review` | One-shot, diff-only review of the current branch or one target. Usage: `/review [quick] [<branch-or-PR-number-or-GitHub-PR-URL>]` (e.g. `/review`, `/review main`, `/review quick 42`, `/review https://github.com/owner/repo/pull/42`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. See [review foundation and rollout](review.md) for staged behavior |
+| `/commit` | Generate a Conventional Commit message from staged Git changes. Add `--copy` (or `-c`) to also copy the message to the system clipboard (with the same OSC 52 fallback as `/copy`). A spinner shows while the model is working |
+| `/review` | Grounded review of the current branch or one target: a read-only agent investigates the pinned revision, every issue must cite `file:line` on or near a changed line (within three lines, or at a deletion boundary), and an independent verifier re-checks it. Targets: a branch, PR number or GitHub PR URL, `last N commits`, or `working tree` (e.g. `/review`, `/review main`, `/review 42`, `/review last 3 commits`). Bare PR numbers are resolved across configured GitHub remotes and their fork parents; ambiguous numbers require a full PR URL. `/review deep [target]` adds specialist finders; `/review quick [<target>]` runs the one-shot diff review; `/review activity` shows the latest review's activity trace. Press `d` for details and `Esc` to cancel while it runs. See [code review](review.md) |
 | `/doctor` | Show environment health report for bug reports |
+| `/whoami` | Show the active provider, model, base URL, and API key. The key keeps its first 3 and last 4 characters and hides the rest (keys under 20 characters are fully hidden), so the output is safe to screenshot |
 | `/update` | Update Nanocoder to the latest version |
 | `/usage` | Get current model context usage visually. Accepts `?context-max=<n>` to preview usage against a different limit (see [Inline Overrides](#inline-overrides)) |
 | `/stats` | Lifetime usage (sessions, prompts, tokens). Ranges: `7d` / `3m` / `all-time`, either as an argument (`/stats 7d`) or with `←`/`→` in the view; `Esc`/`Enter` to close. Use `/stats reset` to clear the ledger |
 | `/tip [text]` | Show a random usage tip, shortcut, or slash command; pass text to pick from tips mentioning it |
 | `/lsp` | List connected LSP servers |
 | `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
-| `/schedule` | Read-only view of cron subscriptions declared by skills (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
-| `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move` (see [Skills](skills.md)) |
+| `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move`. `/skills schedule` is a read-only view of the cron subscriptions skills declare (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
 | `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
 | `/ide` | Connect to an IDE for live integration (e.g., VS Code diff previews) |
-| `/remember` | Save a durable project memory (see [Semantic Memory](semantic-memory.md)) |
-| `/memory` | List, delete, propose, and accept project memories (see [Semantic Memory](semantic-memory.md)) |
+| `/memory` | List, add, delete, propose, and accept project memories. `/memory add [--category <name>] <text>` saves one directly (see [Semantic Memory](semantic-memory.md)) |
 | `/privacy` | Inspect what the prompt scrubber would remove from some text: `/privacy inspect <text>`. Scrubbing itself is switched on with the [`enablePromptScrubbing`](../configuration/preferences.md#what-gets-saved-automatically) preference (`/settings` → **Advanced** → **Privacy**) |
 | `/credits` | Show project contributors and dependencies |
-| `/copilot-login [providerName]` | Log in to GitHub Copilot via device flow. Saves credentials for the named provider, "GitHub Copilot" by default |
-| `/codex-login` | Log in to ChatGPT/Codex via device flow. Saves credentials for the "ChatGPT" provider |
+| `/login <codex\|copilot> [providerName]` | Log in via device flow. `/login codex` saves credentials for the "ChatGPT" provider and `/login copilot` for "GitHub Copilot", unless you name another provider |
 | `/voice` | Configure [Voice Mode](voice-mode.md) (`/voice [on\|off\|hands-free\|ptt\|stt <local\|cloud>\|tts <local\|cloud>\|status\|mode <push-to-talk\|hands-free>]`) |
+
+`/tip`, `/privacy` and `/credits` work as listed but are left out of the `/help` overview; `/help <command>` still shows their details.
+
+### Renamed Commands
+
+These older names were folded into other commands. They still work exactly as before, but are no longer listed in `/help` or offered as completions. `/help <old name>` opens the help for the command it now runs.
+
+| Old name | Now |
+|----------|-----|
+| `/quit` | `/exit` |
+| `/remember <text>` | `/memory add <text>` |
+| `/codex-login [provider]` | `/login codex [provider]` |
+| `/copilot-login [provider]` | `/login copilot [provider]` |
+| `/model-database` | `/model browse` |
+| `/schedule` | `/skills schedule` |
 
 ## Voice Mode
 
@@ -150,12 +165,12 @@ The `!` prefix runs a command in your shell and includes the output as context f
 
 Supported keys:
 
-- `?context-max=<n>` - context limit for this command (accepts `k` suffixes, e.g. `128k`)
+- `?context-max=<n>` - context limit for this command (accepts positive integer or decimal values, k/K and m/M suffixes, e.g. `128k` or `1m`)
 - `?threshold=<50-95>` - on `/compact`, skip compaction when usage is below this percentage
 - `?auto-compact=<on|off>` - auto-compact enabled state for this command
 - `?preview`, `?llm`, `?mechanical`, `?aggressive`, `?conservative` - shorthand for the matching `/compact` flag
 
-Unknown keys are passed to the command unchanged and trigger a warning. Other commands do not parse `?` tokens, so text like `/remember ?important use tabs` is kept exactly as typed. To change a setting for the whole session, use the regular flags instead (for example `/compact --auto-on` or `/context-max 128k`).
+Unknown keys are passed to the command unchanged and trigger a warning. Other commands do not parse `?` tokens, so text like `/memory add ?important use tabs` is kept exactly as typed. To change a setting for the whole session, use the regular flags instead (for example `/compact --auto-on` or `/context-max 128k`).
 
 ## Non-Interactive Mode
 
@@ -185,6 +200,24 @@ For long prompts, use `--prompt-file <path>` to read the prompt from a file inst
 nanocoder run --prompt-file prompt.md
 ```
 
+### Piping Input
+
+`run` reads piped stdin, so command output can go straight into the prompt:
+
+```bash
+git diff | nanocoder run "write a commit message for this change"
+npm test 2>&1 | nanocoder run "why did this fail"
+```
+
+- The piped text is appended to the prompt inside a `<stdin>` block.
+- With no prompt argument, the piped text is the prompt.
+- `--prompt-file -` names stdin as the prompt explicitly. Like any `--prompt-file`, it replaces a positional prompt. It also works on Windows, where `/dev/stdin` does not exist, and exits with an error if stdin is a terminal.
+- Whitespace-only input is ignored, so `run` with no prompt and an empty pipe still exits with the usage error.
+- At most **100,000 characters** are read. This is a character count, not a byte count, so text that is not ASCII can be larger than 100 KB. Longer input is cut at the limit and the prompt ends with `[stdin truncated - kept the first N characters]`, so the model knows it did not see everything.
+- Only `run` reads stdin. `nanocoder review` and the interactive session are unaffected.
+
+> **Note - scripts that launch `run`:** whenever stdin is not a terminal, `run` waits for it to close before starting. A parent process that leaves the pipe open without writing to it makes `run` wait indefinitely. Close it or point it at nothing: `nanocoder run "..." < /dev/null` in a shell, `stdio: ['ignore', 'pipe', 'pipe']` with `spawn`, or `child.stdin.end()` with `execFile`, which always opens a stdin pipe.
+
 If a tool requires approval that the active mode won't grant, nanocoder prints `Tool approval required for: ...` and exits with status code `1` in the Ink runtime, or `2` under the `--plain` runtime (used automatically in CI and non-TTY environments, and always with `--json`).
 
 Because there is nobody to answer a prompt in a `run`, the agent-loop [retry limits](../configuration/index.md#retry-limits) hard-stop instead of pausing: a model that repeats the same tool call, returns empty responses, or keeps emitting malformed tool calls past its configured cap ends the run with an error. The run exits with status code `1` in this case, and also when it fails on a provider or connection error or times out, so CI can tell a failed run from a finished one. Under the `--plain` runtime (used automatically in CI and non-TTY environments) the error also names the limit that fired.
@@ -206,6 +239,26 @@ nanocoder --plain --json run "refactor the auth module" | jq .finalText
 ```
 
 `--json` requires `run` and is incompatible with `--acp` and `--vscode` — combining them exits with an error before the session starts.
+
+#### Validated Structured Output
+
+Use `--json-schema <file|inline JSON>` with `run` to require that the final answer is a single JSON document matching a schema. The flag accepts a schema file path or inline JSON (quote inline schemas so the shell passes them as one argument). It always uses the plain runtime, and cannot be combined with `--no-plain`, `--acp`, `--vscode`, or `review`.
+
+```bash
+nanocoder run --json-schema ./review.schema.json "Review the working tree changes"
+nanocoder run --json-schema '{"type":"object","required":["verdict"],"properties":{"verdict":{"type":"string","enum":["pass","fail"]}}}' "Classify this change"
+```
+
+The schema is included in the model instructions. The final answer is parsed and validated locally; if it is invalid, the validator's errors are sent back to the model for another attempt, using the configured `nanocoder.retries.maxMalformedRetries` limit. If the answer still fails validation, the run exits non-zero and reports the validation errors to `stderr` (or in the JSON report's `message`). A single surrounding JSON markdown fence is tolerated, but prose around the document is not.
+
+Without `--output-format json`, the validated JSON value alone is written to `stdout`, so it can be piped directly to `jq`. With JSON report mode, the validated value is available at `.structured`:
+
+```bash
+nanocoder run --json-schema ./review.schema.json "Review the working tree changes" | jq .verdict
+nanocoder run --output-format json --json-schema ./review.schema.json "Review the working tree changes" | jq .structured.verdict
+```
+
+Schemas are compiled and documents are validated with Ajv. Invalid schemas fail before the run session starts. Ajv's supported JSON Schema keywords, including conditional schemas such as `if`/`then`, `propertyNames`, and `contains`, are enforced. Schemas may declare draft-07, 2019-09 or 2020-12 as their `$schema`. `format` keywords such as `date-time` and `uri` are accepted but not enforced. The schema validation uses prompt-and-validate retries; native provider structured-output modes are not currently wired and may be considered as a follow-up.
 
 #### Output Shape
 

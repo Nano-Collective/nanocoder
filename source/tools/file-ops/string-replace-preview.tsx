@@ -6,15 +6,17 @@ import {getColors} from '@/config/index';
 import {getSyntaxTheme} from '@/config/themes';
 import {DEFAULT_TERMINAL_COLUMNS} from '@/constants';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
+import {truncateAnsi} from '@/terminal/ansi-truncate';
+import {highlight} from '@/terminal/highlighter';
+import {normalizeIndentation} from '@/terminal/indentation-normalizer';
+import {areLinesSimilar, computeInlineDiff} from '@/tools/file-ops/inline-diff';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
+import {countLiteralOccurrences} from '@/tools/file-ops/literal-replace';
+import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import type {Colors} from '@/types/index';
-import {truncateAnsi} from '@/utils/ansi-truncate';
 import {formatError} from '@/utils/error-formatter';
-import {getCachedFileContent} from '@/utils/file-cache';
-import {highlight} from '@/utils/highlighter';
-import {normalizeIndentation} from '@/utils/indentation-normalizer';
-import {areLinesSimilar, computeInlineDiff} from '@/utils/inline-diff';
-import {fitEditToLineEndings} from '@/utils/line-endings';
-import {getLanguageFromExtension} from '@/utils/programming-language-helper';
+import {getCachedFileContent} from '@/utils/fs/file-cache';
+import {truncateText} from '@/utils/truncate-text';
 
 interface StringReplaceArgs {
 	path: string;
@@ -37,10 +39,8 @@ export function stringReplaceDisplayPath(path: string): string {
 }
 
 /** Truncate a plain line to fit terminal width */
-const truncateLine = (line: string, maxWidth: number): string => {
-	if (line.length <= maxWidth) return line;
-	return line.slice(0, maxWidth - 1) + '…';
-};
+const truncateLine = (line: string, maxWidth: number): string =>
+	truncateText(line, maxWidth, {unit: 'code-units'});
 
 export async function formatStringReplacePreview(
 	args: StringReplaceArgs,
@@ -80,7 +80,7 @@ export async function formatStringReplacePreview(
 
 		// Preview mode - validate old_str exists and is unique
 		if (!isResult) {
-			const occurrences = fileContent.split(old_str).length - 1;
+			const occurrences = countLiteralOccurrences(fileContent, old_str);
 
 			if (occurrences === 0) {
 				return (

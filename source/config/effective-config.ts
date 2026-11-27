@@ -30,6 +30,8 @@
 
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import type {CliMode} from '@/app/types';
+import {VALID_MODES} from '@/app/types';
 import {
 	DEFAULT_AUTO_COMPACT_CONFIG,
 	DEFAULT_HEADLESS_CONFIG,
@@ -42,19 +44,34 @@ import {
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
 import {loadPreferences} from '@/config/preferences';
+import {
+	getActiveProfileName,
+	loadAvailableProfiles,
+	loadDefaultProfileName,
+	resolveActiveProfile,
+} from '@/config/profile';
+import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
+import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
+import {isObject} from '@/utils/type-helpers';
 
 /**
  * Where a value came from, in ascending precedence. `default` is a built-in
  * constant, `global` the user-level config directory, `project` the working
  * directory, `env` a `NANOCODER_*` environment variable.
  */
-export type ConfigLayerId = 'default' | 'global' | 'project' | 'env';
+export type ConfigLayerId =
+	| 'default'
+	| 'global'
+	| 'project'
+	| 'profile'
+	| 'env';
 
 /** Ascending precedence. Index into this to compare two layers. */
 const LAYER_PRECEDENCE: readonly ConfigLayerId[] = [
 	'default',
 	'global',
 	'project',
+	'profile',
 	'env',
 ];
 
@@ -114,6 +131,7 @@ export interface ConfigLayerInfo {
 export interface EffectiveConfig {
 	cwd: string;
 	configDir: string;
+	activeProfile?: string;
 	layers: ConfigLayerInfo[];
 	entries: EffectiveConfigEntry[];
 }
@@ -139,6 +157,10 @@ const SECRET_KEY_SEGMENTS = new Set([
 	'apikey',
 	'accesskey',
 	'privatekey',
+	'key',
+	'subscription',
+	'signature',
+	'sig',
 ]);
 
 /** Whether a key names a credential. See SECRET_KEY_SEGMENTS. */
@@ -160,10 +182,6 @@ function isEnvReference(value: unknown): boolean {
 	return typeof value === 'string' && /^\$\{?[A-Za-z_]/.test(value);
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Replace credential values with a placeholder, recursively. Returns the
  * value unchanged (and `redacted: false`) when nothing was secret.
@@ -172,7 +190,19 @@ export function redactValue(
 	value: unknown,
 	keyHint = '',
 ): {value: unknown; redacted: boolean} {
-	if (isSecretKey(keyHint) && !isEnvReference(value)) {
+	return redactConfigValue(value, keyHint);
+}
+
+function redactConfigValue(
+	value: unknown,
+	keyHint: string,
+	rawValue?: unknown,
+): {value: unknown; redacted: boolean} {
+	const resolvedReference =
+		typeof rawValue === 'string' &&
+		rawValue !== value &&
+		/\$\{?[A-Za-z_]/.test(rawValue);
+	if (resolvedReference || (isSecretKey(keyHint) && !isEnvReference(value))) {
 		if (value === undefined || value === null || value === '') {
 			return {value, redacted: false};
 		}
@@ -181,23 +211,73 @@ export function redactValue(
 
 	if (Array.isArray(value)) {
 		let redacted = false;
+		let secretArgument = false;
 		const mapped = value.map(item => {
-			const result = redactValue(item, keyHint);
+			const hint = secretArgument ? 'secret' : keyHint;
+			secretArgument = false;
+			if (keyHint === 'args' && hint !== 'secret' && typeof item === 'string') {
+				const equals = item.indexOf('=');
+				const flag = equals === -1 ? item : item.slice(0, equals);
+				if (flag.startsWith('-') && isSecretKey(flag)) {
+					if (equals === -1) {
+						secretArgument = true;
+						return item;
+					}
+					const result = redactConfigValue(item.slice(equals + 1), 'secret');
+					redacted ||= result.redacted;
+					return `${flag}=${result.value}`;
+				}
+			}
+			const result = redactConfigValue(item, hint);
 			redacted ||= result.redacted;
 			return result.value;
 		});
 		return {value: redacted ? mapped : value, redacted};
 	}
 
-	if (isPlainObject(value)) {
+	if (isObject(value)) {
 		let redacted = false;
 		const mapped: Record<string, unknown> = {};
 		for (const [key, item] of Object.entries(value)) {
-			const result = redactValue(item, key);
+			const raw = isObject(rawValue)
+				? rawValue[key]
+				: key === 'env'
+					? value.rawEnv
+					: key === 'headers'
+						? value.rawHeaders
+						: undefined;
+			const result = redactConfigValue(item, key, raw);
 			redacted ||= result.redacted;
 			mapped[key] = result.value;
 		}
 		return {value: redacted ? mapped : value, redacted};
+	}
+
+	if (typeof value === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+		try {
+			const url = new URL(value);
+			let redacted = false;
+			if (url.username || url.password) {
+				url.username = REDACTED;
+				url.password = '';
+				redacted = true;
+			}
+			for (const key of new Set(url.searchParams.keys())) {
+				if (isSecretKey(key)) {
+					url.searchParams.set(key, REDACTED);
+					redacted = true;
+				}
+			}
+			return {value: redacted ? url.toString() : value, redacted};
+		} catch {
+			// An invalid credential-bearing URL must not leak through diagnostics.
+			if (
+				value.includes('@') ||
+				/[?&][^=]*(?:key|token|secret|password|signature)=/i.test(value)
+			) {
+				return {value: REDACTED, redacted: true};
+			}
+		}
 	}
 
 	return {value, redacted: false};
@@ -216,8 +296,10 @@ interface RawLayer {
 function parseJsonFile(path: string): Record<string, unknown> | null {
 	if (!existsSync(path)) return null;
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-		return isPlainObject(parsed) ? parsed : null;
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
+		return isObject(parsed) ? parsed : null;
 	} catch {
 		return null;
 	}
@@ -232,14 +314,16 @@ function readRawFile(
 		return {layer, file, path, exists: false, data: null};
 	}
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+		const parsed: unknown = JSON.parse(
+			stripUtf8Bom(readFileSync(path, 'utf-8')),
+		);
 		return {
 			layer,
 			file,
 			path,
 			exists: true,
-			data: isPlainObject(parsed) ? parsed : null,
-			error: isPlainObject(parsed)
+			data: isObject(parsed) ? parsed : null,
+			error: isObject(parsed)
 				? undefined
 				: 'top-level value is not a JSON object',
 		};
@@ -264,10 +348,30 @@ function readRawLayers(cwd: string, configDir: string): RawLayer[] {
 		'agents.config.json',
 		'nanocoder-preferences.json',
 	];
-	return files.flatMap(file => [
+	const layers = files.flatMap(file => [
 		readRawFile('global', file, join(configDir, file)),
 		readRawFile('project', file, join(cwd, file)),
 	]);
+
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			const profileOrigin = active.originFile
+				? `${active.originFile} (profile ${active.name})`
+				: `profile: ${active.name}`;
+			layers.push({
+				layer: 'profile',
+				file: 'agents.config.json',
+				path: profileOrigin,
+				exists: true,
+				data: {nanocoder: active.profile},
+			});
+		}
+	} catch {
+		// Ignore if active profile resolution throws in raw reading
+	}
+
+	return layers;
 }
 
 /**
@@ -284,7 +388,7 @@ function getAt(
 ): unknown {
 	return path.reduce<unknown>(
 		(current, segment) =>
-			isPlainObject(current) && Object.hasOwn(current, segment)
+			isObject(current) && Object.hasOwn(current, segment)
 				? current[segment]
 				: undefined,
 		data,
@@ -300,7 +404,7 @@ function hasAt(
 	const parent = getAt(data, path.slice(0, -1));
 	const last = path[path.length - 1] as string;
 	return (
-		isPlainObject(parent) &&
+		isObject(parent) &&
 		Object.hasOwn(parent, last) &&
 		parent[last] !== undefined
 	);
@@ -316,11 +420,7 @@ function flattenLeaves(
 	prefix: string[],
 	maxDepth: number,
 ): Array<{path: string[]; value: unknown}> {
-	if (
-		!isPlainObject(value) ||
-		maxDepth <= 0 ||
-		Object.keys(value).length === 0
-	) {
+	if (!isObject(value) || maxDepth <= 0 || Object.keys(value).length === 0) {
 		return [{path: prefix, value}];
 	}
 	return Object.entries(value).flatMap(([key, item]) =>
@@ -348,7 +448,7 @@ interface BlockSpec {
 	depth?: number;
 }
 
-function blockSpecs(): BlockSpec[] {
+function blockSpecs(cwd?: string): BlockSpec[] {
 	const config = getAppConfig();
 	const agents: ConfigFileName = 'agents.config.json';
 	const preferences: ConfigFileName = 'nanocoder-preferences.json';
@@ -381,6 +481,17 @@ function blockSpecs(): BlockSpec[] {
 			file: agents,
 			effective: config.retries,
 			defaults: DEFAULT_RETRY_LIMITS as unknown as Record<string, unknown>,
+		},
+		{
+			path: ['nanocoder', 'firewall'],
+			file: agents,
+			effective: resolveFirewallConfig(config.firewall),
+			defaults: FIREWALL_DEFAULTS as unknown as Record<string, unknown>,
+		},
+		{
+			path: ['nanocoder', 'verify'],
+			file: agents,
+			effective: config.verify,
 		},
 		{
 			path: ['nanocoder', 'paste'],
@@ -427,6 +538,53 @@ function blockSpecs(): BlockSpec[] {
 			file: agents,
 			effective: config.nanocoderTools,
 			depth: 3,
+		},
+		{
+			path: ['nanocoder', 'hooks'],
+			file: agents,
+			effective: config.hooks,
+		},
+		{
+			path: ['nanocoder', 'formatters'],
+			file: agents,
+			effective: config.formatters,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'lspServers'],
+			file: agents,
+			effective: config.lspServers,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'sandbox'],
+			file: agents,
+			effective: config.sandbox,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'autoCommit'],
+			file: agents,
+			effective: config.autoCommit,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'gitContext'],
+			file: agents,
+			effective: config.gitContext,
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'defaultProfile'],
+			file: agents,
+			effective: loadDefaultProfileName(cwd),
+			leaf: true,
+		},
+		{
+			path: ['nanocoder', 'profiles'],
+			file: agents,
+			effective: loadAvailableProfiles(cwd),
+			leaf: true,
 		},
 	];
 }
@@ -480,10 +638,7 @@ function resolveBlockEntries(
 		? [{path: [] as string[], value: spec.effective}]
 		: [...leafPaths.values()].map(path => ({
 				path,
-				value: getAt(
-					isPlainObject(spec.effective) ? spec.effective : null,
-					path,
-				),
+				value: getAt(isObject(spec.effective) ? spec.effective : null, path),
 			}));
 
 	return leaves.map(leaf => {
@@ -544,20 +699,51 @@ function resolveBlockEntries(
 		for (const loser of losers) pushRaw(loser);
 
 		const {value, redacted} = redactValue(leaf.value, keyHint);
+
+		// `nanocoder.defaultMode` is resolved from an active profile's `mode`
+		// — the loader maps `mode` onto `defaultMode`
+		// (loadHierarchicalConfig in config/index.ts) and the profile
+		// outranks every file's own `defaultMode` — so the profile, not
+		// built-in or a project file, is the source when it supplies one.
+		let profileOrigin: string | undefined;
+		if (
+			value !== undefined &&
+			spec.path.join('.') === 'nanocoder.defaultMode'
+		) {
+			const profileLayer = layers.find(l => l.layer === 'profile');
+			if (profileLayer) {
+				const profileMode = getAt(profileLayer.data, ['nanocoder', 'mode']);
+				if (
+					typeof profileMode === 'string' &&
+					VALID_MODES.includes(profileMode.toLowerCase().trim() as CliMode)
+				) {
+					profileOrigin = profileLayer.path;
+				}
+			}
+		}
+
 		return {
 			key,
 			value,
 			redacted,
-			layer: winnerSuppliesLeaf
-				? ((winner as RawLayer).layer as ConfigLayerId)
-				: ('default' as const),
-			origin: winnerSuppliesLeaf ? (winner as RawLayer).path : 'built-in',
+			layer:
+				profileOrigin !== undefined
+					? 'profile'
+					: winnerSuppliesLeaf
+						? ((winner as RawLayer).layer as ConfigLayerId)
+						: ('default' as const),
+			origin:
+				profileOrigin !== undefined
+					? profileOrigin
+					: winnerSuppliesLeaf
+						? (winner as RawLayer).path
+						: 'built-in',
 			hasDefault,
 			defaultValue,
 			shadowed,
 			block: blockKey,
-			blockOrigin: winner?.path,
-			blockLayer: winner?.layer,
+			blockOrigin: profileOrigin !== undefined ? profileOrigin : winner?.path,
+			blockLayer: profileOrigin !== undefined ? 'profile' : winner?.layer,
 			rule: 'block' as const,
 		};
 	});
@@ -627,7 +813,7 @@ function resolveProviderEntries(layers: RawLayer[]): EffectiveConfigEntry[] {
 		const list = Array.isArray(nested) ? nested : Array.isArray(top) ? top : [];
 		const byName = new Map<string, unknown>();
 		for (const provider of list) {
-			if (isPlainObject(provider) && typeof provider.name === 'string') {
+			if (isObject(provider) && typeof provider.name === 'string') {
 				byName.set(provider.name, provider);
 			}
 		}
@@ -697,16 +883,14 @@ function readEnvProviderNames(): Set<string> {
 	if (!rawData) return names;
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		const list = Array.isArray(parsed)
 			? parsed
-			: (getAt(isPlainObject(parsed) ? parsed : null, [
-					'nanocoder',
-					'providers',
-				]) ?? getAt(isPlainObject(parsed) ? parsed : null, ['providers']));
+			: (getAt(isObject(parsed) ? parsed : null, ['nanocoder', 'providers']) ??
+				getAt(isObject(parsed) ? parsed : null, ['providers']));
 		if (!Array.isArray(list)) return names;
 		for (const provider of list) {
-			if (isPlainObject(provider) && typeof provider.name === 'string') {
+			if (isObject(provider) && typeof provider.name === 'string') {
 				names.add(provider.name);
 			}
 		}
@@ -725,9 +909,9 @@ function readMcpServers(
 ): Map<string, unknown> {
 	const byName = new Map<string, unknown>();
 	const servers = getAt(data, ['mcpServers']);
-	if (!isPlainObject(servers)) return byName;
+	if (!isObject(servers)) return byName;
 	for (const [name, server] of Object.entries(servers)) {
-		byName.set(name, isPlainObject(server) ? {name, ...server} : server);
+		byName.set(name, isObject(server) ? {name, ...server} : server);
 	}
 	return byName;
 }
@@ -754,18 +938,18 @@ function readEnvMcpServers(): {servers: Map<string, unknown>; origin: string} {
 	if (!rawData) return {servers: new Map(), origin};
 
 	try {
-		const parsed: unknown = JSON.parse(rawData);
+		const parsed: unknown = JSON.parse(stripUtf8Bom(rawData));
 		if (Array.isArray(parsed)) {
 			const byName = new Map<string, unknown>();
 			for (const server of parsed) {
-				if (isPlainObject(server) && typeof server.name === 'string') {
+				if (isObject(server) && typeof server.name === 'string') {
 					byName.set(server.name, server);
 				}
 			}
 			return {servers: byName, origin};
 		}
 		return {
-			servers: readMcpServers(isPlainObject(parsed) ? parsed : null),
+			servers: readMcpServers(isObject(parsed) ? parsed : null),
 			origin,
 		};
 	} catch {
@@ -778,8 +962,24 @@ function resolveMcpEntries(
 	configDir: string,
 ): EffectiveConfigEntry[] {
 	const env = readEnvMcpServers();
-	// Ascending precedence, matching `mergeMCPConfigs`: env beats project
-	// beats global, and only a server of the same name is displaced.
+	// Ascending precedence, matching `mergeMCPConfigs`: env beats profile
+	// beats project beats global, and only a server of the same name is
+	// displaced.
+	let profileOrigin = `profile: unknown`;
+	let profileServers = new Map<string, unknown>();
+	try {
+		const active = resolveActiveProfile(cwd);
+		if (active) {
+			profileOrigin = active.originFile ?? `profile: ${active.name}`;
+			profileServers = readMcpServers(
+				active.profile as Record<string, unknown>,
+			);
+		}
+	} catch {
+		// A removed or renamed active profile is silently ignored so config
+		// loading keeps falling back to the files instead of crashing mid-session.
+	}
+
 	const mcpLayers: Array<{
 		layer: ConfigLayerId;
 		origin: string;
@@ -795,10 +995,11 @@ function resolveMcpEntries(
 			origin: join(cwd, '.mcp.json'),
 			servers: readMcpServers(parseJsonFile(join(cwd, '.mcp.json'))),
 		},
+		{layer: 'profile', origin: profileOrigin, servers: profileServers},
 		{layer: 'env', origin: env.origin, servers: env.servers},
 	];
 
-	return loadAllMCPConfigs().map(({server, source}) => {
+	return loadAllMCPConfigs(cwd).map(({server, source}) => {
 		const name = server.name;
 		const winnerIndex = mcpLayers.findIndex(l => l.layer === source);
 		const winner = mcpLayers[winnerIndex];
@@ -851,7 +1052,7 @@ export function resolveEffectiveConfig(options?: {
 	const rawLayers = readRawLayers(cwd, configDir);
 
 	const entries: EffectiveConfigEntry[] = [
-		...blockSpecs().flatMap(spec => resolveBlockEntries(spec, rawLayers)),
+		...blockSpecs(cwd).flatMap(spec => resolveBlockEntries(spec, rawLayers)),
 		...resolvePreferencesEntries(rawLayers),
 		...resolveProviderEntries(rawLayers),
 		...resolveMcpEntries(cwd, configDir),
@@ -881,7 +1082,14 @@ export function resolveEffectiveConfig(options?: {
 			})),
 	];
 
-	return {cwd, configDir, layers, entries};
+	let activeProfile: string | undefined;
+	try {
+		activeProfile = getActiveProfileName(cwd);
+	} catch {
+		// Ignore
+	}
+
+	return {cwd, configDir, activeProfile, layers, entries};
 }
 
 /**
@@ -903,6 +1111,11 @@ export function selectOverrides(
  * block), then the same two with a `nanocoder.` prefix added, then
  * case-insensitively, and finally as a substring so a bare `threshold` still
  * finds something.
+ *
+ * A `nanocoder.`-prefixed query also falls back to the same key under
+ * `preferences.`, because every other setting lives under `nanocoder.` and
+ * reaching for `nanocoder.notifications` is the natural habit — the key just
+ * happens to live at the top level of nanocoder-preferences.json.
  */
 export function findEntries(
 	config: EffectiveConfig,
@@ -912,6 +1125,9 @@ export function findEntries(
 	if (query === '') return [];
 
 	const candidates = [query, `nanocoder.${query}`, `preferences.${query}`];
+	if (query.startsWith('nanocoder.')) {
+		candidates.push(`preferences.${query.slice('nanocoder.'.length)}`);
+	}
 
 	for (const candidate of candidates) {
 		const exact = config.entries.filter(entry => entry.key === candidate);

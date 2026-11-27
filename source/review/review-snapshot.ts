@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {copyFile, mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {copyFile, mkdtemp, rm, stat, utimes, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {structuredPatch} from 'diff';
@@ -26,6 +26,8 @@ export interface ReviewSnapshotScope {
 export interface ReviewLineMap {
 	changedBaseLines: number[];
 	changedHeadLines: number[];
+	/** Surviving head lines adjacent to deletion-only zero-context hunks. */
+	headDeletionAnchors?: number[];
 }
 
 export interface ReviewFileSnapshot {
@@ -162,7 +164,19 @@ function mapChangedLines(
 	);
 	const changedBaseLines: number[] = [];
 	const changedHeadLines: number[] = [];
+	const headLines = (headContent ?? '').split('\n');
+	if (headLines.at(-1) === '') headLines.pop();
+	const headDeletionAnchors = new Set<number>();
 	for (const hunk of patch.hunks) {
+		if (hunk.oldLines > 0 && hunk.newLines === 0 && headLines.length > 0) {
+			// structuredPatch uses the insertion position (c + 1); the
+			// serialized @@ -a,b +c,0 @@ header subtracts one from newStart.
+			for (const boundary of [hunk.newStart - 1, hunk.newStart]) {
+				headDeletionAnchors.add(
+					Math.min(headLines.length, Math.max(1, boundary)),
+				);
+			}
+		}
 		let baseLine = hunk.oldStart;
 		let headLine = hunk.newStart;
 		for (const line of hunk.lines) {
@@ -176,7 +190,11 @@ function mapChangedLines(
 			}
 		}
 	}
-	return {changedBaseLines, changedHeadLines};
+	return {
+		changedBaseLines,
+		changedHeadLines,
+		headDeletionAnchors: [...headDeletionAnchors],
+	};
 }
 
 function makeSnapshot(
@@ -426,6 +444,12 @@ async function findSecretLookingUntrackedFiles(
 	return skipped;
 }
 
+async function copyIndexKeepingTime(from: string, to: string): Promise<void> {
+	const {atime, mtime} = await stat(from);
+	await copyFile(from, to);
+	await utimes(to, atime, mtime);
+}
+
 /**
  * Record the worktree (tracked changes plus untracked, non-ignored files) as a
  * Git tree through a throwaway index, so the real index and files are never
@@ -448,20 +472,26 @@ async function writeWorkingTree(
 	const scratchIndex = join(directory, 'index');
 	try {
 		// Starting from a copy keeps Git's stat cache, so unchanged files are
-		// not re-hashed. A repository without an index starts empty.
-		await copyFile(realIndex, scratchIndex).catch((error: unknown) => {
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-			dependencies.activity
-				.begin({
-					source: 'review',
-					name: 'Copy Git index',
-					summary: 'Copying the Git index into a scratch index',
-				})
-				.fail(
-					error,
-					'Could not copy the Git index; recording the worktree from an empty index instead',
-				);
-		});
+		// not re-hashed. The copy keeps the index's modified time: Git re-hashes
+		// any file changed no earlier than the index was written, and a fresh
+		// time on the copy would hide an edit made in that same second. A
+		// repository without an index starts empty.
+		await copyIndexKeepingTime(realIndex, scratchIndex).catch(
+			async (error: unknown) => {
+				await rm(scratchIndex, {force: true});
+				if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+				dependencies.activity
+					.begin({
+						source: 'review',
+						name: 'Copy Git index',
+						summary: 'Copying the Git index into a scratch index',
+					})
+					.fail(
+						error,
+						'Could not copy the Git index; recording the worktree from an empty index instead',
+					);
+			},
+		);
 		const skipped = await findSecretLookingUntrackedFiles(
 			repositoryRoot,
 			dependencies,

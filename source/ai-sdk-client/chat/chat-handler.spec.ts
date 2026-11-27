@@ -12,6 +12,7 @@ import type {
 	AIProviderConfig,
 	AISDKCoreTool,
 	Message,
+	ModeOverrides,
 	StreamCallbacks,
 } from '@/types/index';
 import type {LanguageModel} from 'ai';
@@ -396,6 +397,38 @@ async function scrubbedPayload(
 	});
 	return {payload: JSON.stringify(captured.prompt), sessionMap};
 }
+
+// Codex sends the system prompt as the `instructions` provider option, built
+// beside the prompt that goes through the scrubber.
+test('privacy: scrubs the system prompt sent as Codex instructions', async t => {
+	const captured: {prompt?: unknown; providerOptions?: unknown} = {};
+	await handleChat({
+		model: capturingModel(captured),
+		currentModel: 'gpt-5-codex',
+		providerConfig: {
+			name: 'Codex',
+			type: 'openai',
+			sdkProvider: 'chatgpt-codex',
+			models: ['gpt-5-codex'],
+			config: {baseURL: 'https://api.test.com'},
+		},
+		messages: [
+			{role: 'system', content: 'Internal contact: bob.secret@example.com'},
+			{role: 'user', content: 'hello'},
+		],
+		tools: {},
+		callbacks: {},
+		maxRetries: 0,
+		privacyEnabled: true,
+		privacySessionMapRef: {current: {}},
+	});
+
+	const {instructions} = (
+		captured.providerOptions as {openai: {instructions: string}}
+	).openai;
+	t.false(instructions.includes('bob.secret@example.com'));
+	t.regex(instructions, /«Email_\d+»/);
+});
 
 test('privacy: scrubs tool result content', async t => {
 	const {payload, sessionMap} = await scrubbedPayload([
@@ -867,13 +900,17 @@ test('alternating deltas with no start markers keep their own callbacks', async 
 	t.deepEqual(routed.text, ['Answer', ' continues']);
 });
 
-function capturingModel(captured: {prompt?: unknown}): LanguageModel {
+function capturingModel(captured: {
+	prompt?: unknown;
+	providerOptions?: unknown;
+}): LanguageModel {
 	return {
 		specificationVersion: 'v3',
 		provider: 'anthropic',
 		modelId: 'claude-sonnet-4-5',
-		doStream: async (options: {prompt: unknown}) => {
+		doStream: async (options: {prompt: unknown; providerOptions?: unknown}) => {
 			captured.prompt = options.prompt;
+			captured.providerOptions = options.providerOptions;
 			return {
 				stream: new ReadableStream({
 					start(controller) {
@@ -1422,4 +1459,129 @@ test.serial('a valid call still comes back after one request with its arguments'
 	const [call] = response.choices[0]?.message.tool_calls ?? [];
 	t.deepEqual(call?.function.arguments, {path: 'hello.txt'});
 	t.is(call?.argumentsError, undefined);
+});
+
+// --- Models that reject native tools ---
+
+const badRequest = (message: string) =>
+	new Response(JSON.stringify({error: {message}}), {
+		status: 400,
+		headers: {'content-type': 'application/json'},
+	});
+
+async function chatWithToolRejectingServer(
+	modelId: string,
+	respond: (body: Record<string, unknown>) => Response,
+) {
+	const {createOpenAICompatible} = await import('@ai-sdk/openai-compatible');
+	const bodies: Record<string, unknown>[] = [];
+	const model = createOpenAICompatible({
+		name: 'ollama',
+		baseURL: 'http://localhost:11434/v1',
+		fetch: async (_input, init) => {
+			const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			bodies.push(body);
+			return respond(body);
+		},
+	})(modelId);
+	const run = (modeOverrides?: ModeOverrides) =>
+		handleChat({
+			model,
+			currentModel: modelId,
+			modeOverrides,
+			providerConfig: {
+				name: 'ollama',
+				type: 'openai',
+				models: [modelId],
+				config: {baseURL: 'http://localhost:11434/v1'},
+			},
+			messages: [
+				{role: 'system', content: 'You are a coding agent.'},
+				{role: 'user', content: 'read hello.txt'},
+			],
+			tools: {
+				read_file: tool({
+					description: 'read a file',
+					inputSchema: jsonSchema({
+						type: 'object',
+						properties: {path: {type: 'string'}},
+					}),
+				}),
+			},
+			callbacks: {},
+			maxRetries: 0,
+		});
+	const systemPrompt = (body: Record<string, unknown> | undefined) => {
+		const messages = (body?.messages ?? []) as Array<{
+			role: string;
+			content: string;
+		}>;
+		return messages.find(m => m.role === 'system')?.content ?? '';
+	};
+	return {bodies, run, systemPrompt};
+}
+
+test.serial('a model that rejects native tools is retried with XML tool definitions and remembered', async t => {
+	const {bodies, run, systemPrompt} = await chatWithToolRejectingServer(
+		'local-model-without-tools',
+		body =>
+			body.tools
+				? badRequest('registry.ollama.ai/library/local-model does not support tools')
+				: sseReply('<read_file><path>hello.txt</path></read_file>'),
+	);
+
+	const first = await run();
+	t.true(first.toolsDisabled);
+	t.is(bodies.length, 2);
+	t.truthy(bodies[0]?.tools);
+	t.falsy(bodies[1]?.tools);
+	// The retry says how to call tools in text, and which tools exist.
+	t.false(systemPrompt(bodies[0]).includes('## AVAILABLE TOOLS'));
+	t.true(systemPrompt(bodies[1]).includes('## AVAILABLE TOOLS'));
+	t.true(systemPrompt(bodies[1]).includes('read_file'));
+
+	// The next turn goes straight to the fallback instead of failing again.
+	const second = await run();
+	t.true(second.toolsDisabled);
+	t.is(bodies.length, 3);
+	t.falsy(bodies[2]?.tools);
+	t.true(systemPrompt(bodies[2]).includes('## AVAILABLE TOOLS'));
+});
+
+test.serial("tune's XML/JSON tool mode keeps native tools off the request", async t => {
+	// The caller already appended the tool definitions to the system prompt
+	// for tune's text tool mode. Sending native tools alongside them gives the
+	// model two contradictory ways to call tools.
+	const {bodies, run, systemPrompt} = await chatWithToolRejectingServer(
+		'model-on-tune-xml-mode',
+		() => sseReply('<read_file><path>hello.txt</path></read_file>'),
+	);
+
+	const result = await run({
+		nonInteractiveMode: false,
+		nonInteractiveAlwaysAllow: [],
+		nativeToolsDisabled: true,
+	});
+	t.true(result.toolsDisabled, 'the loop parses tool calls from text');
+	t.is(bodies.length, 1);
+	t.falsy(bodies[0]?.tools);
+	t.false(
+		systemPrompt(bodies[0]).includes('## AVAILABLE TOOLS'),
+		'definitions are not appended a second time',
+	);
+});
+
+test.serial('a tool-pairing error in the history is surfaced, not retried without tools', async t => {
+	const {bodies, run} = await chatWithToolRejectingServer(
+		'model-with-broken-history',
+		() =>
+			badRequest(
+				"Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'.",
+			),
+	);
+
+	const error = await t.throwsAsync(run());
+	t.regex(error?.message ?? '', /must be a response to a preceeding message/);
+	t.is(bodies.length, 1);
+	t.truthy(bodies[0]?.tools);
 });

@@ -223,3 +223,48 @@ test('isToolSupportError handles Error subclasses', t => {
 		isToolSupportError(new CustomError('some other error')),
 	);
 });
+
+test('isToolSupportError ignores errors about tool calls in the history', t => {
+	// These mention tools because the history holds tool calls, but the model
+	// supports tools: retrying without them would hide the real error.
+	for (const message of [
+		"400 Bad Request: Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'.",
+		"An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. The following tool_call_ids did not have response messages: call_abc",
+		'messages.3: `tool_use` ids were found without `tool_result` blocks immediately after: toolu_01',
+		'unexpected `tool_use_id` found in `tool_result` blocks: toolu_01',
+		"Invalid 'messages[4].tool_calls[0].function.arguments': expected a JSON string",
+		"400 Bad Request: This model's maximum context length is 128000 tokens, including tool definitions",
+	]) {
+		t.false(isToolSupportError(new Error(message)), message);
+	}
+});
+
+test('isToolSupportError detects Ollama models without tool support', t => {
+	t.true(
+		isToolSupportError(
+			new Error('registry.ollama.ai/library/deepseek-r1:8b does not support tools'),
+		),
+	);
+	t.true(isToolSupportError(new Error("This model doesn't support function calling")));
+});
+
+test('isToolSupportError reads the server message from stream errors', t => {
+	// A refused streamed request throws a bare NoOutputGeneratedError; the
+	// server's explanation is only on the error the stream reported.
+	const thrown = new Error('No output generated. Check the stream for errors.');
+	thrown.name = 'AI_NoOutputGeneratedError';
+
+	t.false(isToolSupportError(thrown));
+	t.true(
+		isToolSupportError(thrown, [
+			new Error('registry.ollama.ai/library/gemma:2b does not support tools'),
+		]),
+	);
+	t.false(
+		isToolSupportError(thrown, [
+			new Error(
+				"Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'.",
+			),
+		]),
+	);
+});

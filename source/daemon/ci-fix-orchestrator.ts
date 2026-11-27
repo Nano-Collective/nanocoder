@@ -28,7 +28,8 @@ import type {SubagentResult, SubagentTask} from '@/subagents/types';
 import {createDraftPr, execGh, execGit} from '@/tools/git/utils';
 import {formatError} from '@/utils/error-formatter';
 import {redactSecrets} from '@/verify/redact-secrets';
-import type {TrustLevel} from '@/verify/trust';
+import type {TrustLevel} from '@/verify/trust-level';
+import {findRestrictedChanges} from './ci-fix-path-guard';
 import {
 	type CiFixWorktree,
 	createCiFixWorktree,
@@ -56,6 +57,14 @@ export interface CiFixOrchestratorDeps {
 	/** SHAs of commits this daemon already published as CI fixes. */
 	readAutoFixedShas: (projectRoot: string) => Promise<string[]>;
 	recordAutoFixedShas: (projectRoot: string, shas: string[]) => Promise<void>;
+	/** The clone's HEAD before the fix run, to diff its commits against. */
+	readCloneHead: (clonePath: string) => Promise<string>;
+	/** Changes a full-commit push must not carry (see ci-fix-path-guard). */
+	findRestrictedChanges: (
+		clonePath: string,
+		baseline: string,
+		branch: string,
+	) => Promise<string[]>;
 }
 
 export interface PublishBranchOptions {
@@ -329,6 +338,9 @@ const defaultDeps: CiFixOrchestratorDeps = {
 			),
 		});
 	},
+	readCloneHead: async clonePath =>
+		(await execGit(['-C', clonePath, 'rev-parse', 'HEAD'])).trim(),
+	findRestrictedChanges,
 };
 
 function toSubagentResult(
@@ -361,6 +373,8 @@ export async function runCiAutoFixFlow(
 		createDraftPr,
 		readAutoFixedShas,
 		recordAutoFixedShas,
+		readCloneHead,
+		findRestrictedChanges: findRestricted,
 	} = {...defaultDeps, ...deps};
 	const startTime = Date.now();
 
@@ -403,6 +417,7 @@ export async function runCiAutoFixFlow(
 			projectRoot,
 			originalBranch: payload.branch,
 			runId: payload.runId,
+			headSha: payload.headSha,
 			trustLevel,
 		});
 	} catch (err) {
@@ -414,6 +429,17 @@ export async function runCiAutoFixFlow(
 	}
 
 	try {
+		// Taken before the fix run can touch the clone's refs.
+		let baseline: string | undefined;
+		if (trustLevel === 'full-commit') {
+			try {
+				baseline = await readCloneHead(worktree.path);
+			} catch (err) {
+				return toSubagentResult(task.subagent_type, startTime, {
+					error: `Could not read the CI-fix clone's HEAD: ${formatError(err)}`,
+				});
+			}
+		}
 		const failedLogPath = await stageFailedLog(worktree.path, payload.runId);
 
 		let runnerResult: CiFixRunnerResult;
@@ -482,6 +508,24 @@ export async function runCiAutoFixFlow(
 					success: true,
 					fixApplied: true,
 					output: `Opened draft PR: ${prUrl}\n\n${runnerResult.output}`,
+				});
+			}
+
+			// An unattended push onto the branch itself: refuse fixes that touch
+			// files which run code in CI, in git or in nanocoder. Nothing is
+			// pushed, not even to a side branch, since a workflow change on any
+			// branch can run on push.
+			const restricted = await findRestricted(
+				worktree.path,
+				baseline ?? '',
+				worktree.branch,
+			);
+			if (restricted.length > 0) {
+				return toSubagentResult(task.subagent_type, startTime, {
+					output: runnerResult.output,
+					error:
+						`Not pushing the fix to ${worktree.branch}: it changes ${restricted.join(', ')}, ` +
+						'which full-commit never pushes unattended. Review the diagnosis and apply it by hand.',
 				});
 			}
 

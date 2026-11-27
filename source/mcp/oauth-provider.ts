@@ -94,6 +94,8 @@ export interface MCPOAuthProviderOptions {
 	openBrowser?: boolean;
 	/** How long to wait for the redirect, in ms (default 5 minutes). */
 	callbackTimeoutMs?: number;
+	/** Start an interactive login without discarding stored tokens. */
+	forceAuthorization?: boolean;
 }
 
 const DEFAULT_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -174,12 +176,14 @@ interface PendingCallback {
 	server: http.Server;
 	redirectUrl: URL;
 	code: Promise<string>;
+	cancel: () => void;
 }
 
 export class MCPOAuthProvider implements OAuthClientProvider {
 	private readonly serverName: string;
 	private readonly serverUrl: string;
 	private readonly interactive: boolean;
+	private readonly forceAuthorization: boolean;
 	private readonly onAuthorizationUrl?: (url: URL) => void;
 	private readonly shouldOpenBrowser: boolean;
 	private readonly callbackTimeoutMs: number;
@@ -187,6 +191,7 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 	private currentState: string | undefined;
 	private currentCodeVerifier: string | undefined;
 	private pending: PendingCallback | undefined;
+	private resolvedRedirectUrl: URL | undefined;
 	/**
 	 * The transport asks for tokens on every request; cache them so a tool
 	 * call does not re-read the credentials file. `null` means "not loaded".
@@ -195,6 +200,8 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 
 	constructor(options: MCPOAuthProviderOptions) {
 		this.serverName = options.serverName;
+		this.forceAuthorization = options.forceAuthorization ?? false;
+		if (options.forceAuthorization) this.cachedTokens = undefined;
 		this.serverUrl = options.serverUrl;
 		this.interactive = options.interactive ?? false;
 		this.onAuthorizationUrl = options.onAuthorizationUrl;
@@ -214,7 +221,7 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 		// any port for loopback redirect URIs, so the real port chosen later
 		// still matches.
 		return (
-			this.pending?.redirectUrl ?? new URL(`http://127.0.0.1${CALLBACK_PATH}`)
+			this.resolvedRedirectUrl ?? new URL(`http://127.0.0.1${CALLBACK_PATH}`)
 		);
 	}
 
@@ -280,6 +287,10 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 		if (scope !== 'client') {
 			this.cachedTokens = undefined;
 		}
+		if (this.forceAuthorization && scope !== 'client') {
+			if (scope === 'all') removeMCPOAuthCredential(this.serverUrl, 'client');
+			return;
+		}
 		removeMCPOAuthCredential(this.serverUrl, scope);
 	}
 
@@ -321,16 +332,6 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 				res.end('Not found');
 				return;
 			}
-			const error = url.searchParams.get('error');
-			if (error) {
-				const description =
-					url.searchParams.get('error_description') ?? 'no description';
-				const message = `Authorization server returned "${error}": ${description}`;
-				res.writeHead(400, {'Content-Type': 'text/html; charset=utf-8'});
-				res.end(errorHtml(message));
-				rejectCode(new Error(message));
-				return;
-			}
 			const state = url.searchParams.get('state');
 			const authorizationCode = url.searchParams.get('code');
 			if (state !== expectedState) {
@@ -342,6 +343,17 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 				// the real callback that may still arrive.
 				return;
 			}
+			const error = url.searchParams.get('error');
+			if (error) {
+				const description =
+					url.searchParams.get('error_description') ?? 'no description';
+				const message = `Authorization server returned "${error}": ${description}`;
+				res.writeHead(400, {'Content-Type': 'text/html; charset=utf-8'});
+				res.end(errorHtml(message));
+				rejectCode(new Error(message));
+				return;
+			}
+
 			if (!authorizationCode) {
 				const message = 'Redirect did not include an authorization code.';
 				res.writeHead(400, {'Content-Type': 'text/html; charset=utf-8'});
@@ -377,12 +389,18 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 		// the caller gave up); the awaiting caller still sees the rejection.
 		settled.catch(() => {});
 
-		this.pending = {server, redirectUrl, code: settled};
+		this.resolvedRedirectUrl = redirectUrl;
+		this.pending = {
+			server,
+			redirectUrl,
+			code: settled,
+			cancel: () => rejectCode(new Error('Login cancelled.')),
+		};
 		return redirectUrl;
 	}
 
 	/** Wait for the authorization code delivered to the loopback redirect. */
-	waitForAuthorizationCode(): Promise<string> {
+	waitForAuthorizationCode(signal?: AbortSignal): Promise<string> {
 		if (!this.pending) {
 			return Promise.reject(
 				new Error(
@@ -390,7 +408,19 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 				),
 			);
 		}
-		return this.pending.code;
+		const code = this.pending.code;
+		if (!signal) return code;
+		return new Promise<string>((resolve, reject) => {
+			const abort = () => {
+				this.stopCallbackListener();
+				reject(new Error('Login cancelled.'));
+			};
+			signal.addEventListener('abort', abort, {once: true});
+			if (signal.aborted) abort();
+			code
+				.then(resolve, reject)
+				.finally(() => signal.removeEventListener('abort', abort));
+		});
 	}
 
 	/** Stop the loopback listener (idempotent). */
@@ -398,6 +428,7 @@ export class MCPOAuthProvider implements OAuthClientProvider {
 		const pending = this.pending;
 		this.pending = undefined;
 		if (pending) {
+			pending.cancel();
 			pending.server.close();
 			// Drop keep-alive connections so the process can exit promptly.
 			pending.server.closeAllConnections?.();

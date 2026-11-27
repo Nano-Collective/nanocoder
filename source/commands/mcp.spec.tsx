@@ -171,3 +171,17 @@ test('MCPLoginFlow delivers the current state, then updates in order', async t =
 	t.deepEqual(seen, ['starting', 'visit', 'done']);
 	t.is(flow.getState().authorizationUrl, 'https://a.example/x');
 });
+
+
+test.serial('login flow cancellation aborts the pending authorization', async t => {
+ let received: AbortSignal | undefined;
+ const flow = new MCPLoginFlow('remote', async (_url, signal) => {
+  received = signal;
+  await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Login cancelled.')), {once: true}));
+ });
+ flow.cancel();
+ await new Promise(resolve => setImmediate(resolve));
+ t.true(received?.aborted);
+ t.is(flow.getState().status, 'error');
+ t.is(flow.getState().error, 'Login cancelled.');
+});

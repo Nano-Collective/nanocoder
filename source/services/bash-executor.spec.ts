@@ -4,6 +4,10 @@ import {mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'nod
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {
+	BASH_BACKGROUND_MAX_RETAINED_JOBS,
+	BASH_JOB_PEEK_OUTPUT_LIMIT,
+} from '@/constants';
 import { BashExecutor } from './bash-executor';
 import {resetSessionCwd, setSessionCwd} from './session-cwd';
 
@@ -420,7 +424,11 @@ test('timeout resolves with the timeout error after timeoutMs', async t => {
 	const elapsed = Date.now() - start;
 
 	t.true(result.isComplete, 'Command should be marked complete');
-	t.is(result.error, 'Command timed out after 100ms', 'Should have the specific timeout error');
+	t.is(
+		result.error,
+		'Command timed out after 0.1 seconds',
+		'Should have the specific timeout error, in the unit timeout_seconds uses',
+	);
 	t.true(elapsed < 1000, `Command ran ${elapsed}ms — it was successfully killed early by the timeout`);
 });
 
@@ -798,6 +806,15 @@ writeFileSync(
 );
 const LONG_RUNNING_NODE = `node ${SLEEPER}`;
 
+// Prints once immediately, then keeps printing so a test can tell one read
+// from the next.
+const CHATTY = join(mkdtempSync(join(tmpdir(), 'nc-chatty-')), 'chatty.js');
+writeFileSync(
+	CHATTY,
+	"let i = 0; console.log('PID:' + process.pid + ' tick ' + i); setInterval(() => console.log('tick ' + (++i)), 100);\n",
+);
+const CHATTY_NODE = `node ${CHATTY}`;
+
 async function childPidOf(
 	executor: BashExecutor,
 	executionId: string,
@@ -847,7 +864,7 @@ test('tree kill: a timeout stops the program the shell started', async t => {
 
 	const result = await promise;
 
-	t.is(result.error, 'Command timed out after 1500ms');
+	t.is(result.error, 'Command timed out after 1.5 seconds');
 	t.true(await isGoneWithin(childPid!, 5000), 'child node process must not survive the timeout');
 });
 
@@ -898,7 +915,7 @@ posixOnly('timeout is reported only once a group that ignores SIGTERM is gone', 
 
 	const result = await promise;
 
-	t.is(result.error, 'Command timed out after 500ms');
+	t.is(result.error, 'Command timed out after 0.5 seconds');
 	t.false(isGroupAlive(pgid!), 'no process of the command may outlive the timeout result');
 });
 
@@ -949,6 +966,232 @@ posixOnly('killAll SIGKILLs running commands and leftover jobs without waiting',
 	t.true(await isGoneWithin(runningPgid!, 1000), 'the running command must be gone');
 	t.true(await isGoneWithin(leftoverPgid, 1000), 'the background job must be gone');
 });
+
+// ============================================================================
+// Background jobs
+// ============================================================================
+
+test('background execute keeps running and readJobOutput reports it', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid, 'Should have captured the child PID');
+
+	const first = executor.readJobOutput(executionId);
+	t.truthy(first);
+	t.false(first!.isComplete);
+	t.is(first!.exitCode, null);
+	t.true(first!.output.includes(`PID:${childPid}`));
+
+	await executor.killJob(executionId);
+
+	const final = executor.readJobOutput(executionId);
+	t.truthy(final);
+	t.true(final!.isComplete);
+	t.is(final!.error, 'Killed by user');
+	t.true(await isGoneWithin(childPid!, 5000), 'the job must be gone after killJob');
+});
+
+test('readJobOutput only returns output produced since the previous read', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(CHATTY_NODE, {background: true});
+	t.truthy(await childPidOf(executor, executionId));
+
+	const first = executor.readJobOutput(executionId)!;
+	t.true(first.output.includes('tick 0'));
+
+	await new Promise(resolve => setTimeout(resolve, 300));
+	const second = executor.readJobOutput(executionId)!;
+	t.false(second.output.includes('tick 0'));
+	t.true(second.output.includes('tick'));
+
+	await executor.killJob(executionId);
+});
+
+test('bash_output keeps returning new output from a background job past the cap', async t => {
+	const executor = createExecutor();
+	const dir = mkdtempSync(join(tmpdir(), 'nc-bg-keeplatest-'));
+	const script = join(dir, 'flood.js');
+	writeFileSync(
+		script,
+		"console.log('PID:' + process.pid); console.log('A'.repeat(6 * 1024 * 1024)); setInterval(() => console.log('tick'), 100);\n",
+	);
+	const {executionId} = executor.execute(`node ${script}`, {background: true});
+
+	// Let the flood cross the cap and a few ticks land.
+	await new Promise(resolve => setTimeout(resolve, 3000));
+	const first = executor.readJobOutput(executionId)!;
+	t.truthy(first.output, 'the flood itself must be readable');
+
+	await new Promise(resolve => setTimeout(resolve, 1000));
+	const second = executor.readJobOutput(executionId)!;
+	t.true(
+		second.output.includes('tick'),
+		'bash_output must keep returning output after the cap was trimmed',
+	);
+
+	await executor.killJob(executionId);
+});
+
+test('background execute ignores the turn AbortSignal', async t => {
+	const executor = createExecutor();
+	const controller = new AbortController();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {
+		background: true,
+		signal: controller.signal,
+	});
+	const childPid = await childPidOf(executor, executionId);
+	t.truthy(childPid);
+
+	controller.abort();
+	await new Promise(resolve => setTimeout(resolve, 300));
+
+	t.true(isLiveProcess(childPid!), 'aborting the turn must not stop the job');
+	t.false(executor.getState(executionId)!.isComplete);
+
+	await executor.killJob(executionId);
+});
+
+test('isBackgroundJob reports whether an execution is a background job', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	t.true(executor.isBackgroundJob(executionId));
+	t.false(executor.isBackgroundJob('missing-id'));
+	await executor.killJob(executionId);
+});
+
+test('listJobs reports running and stopped jobs with their timing', async t => {
+	const executor = createExecutor();
+	const startedBefore = Date.now();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+
+	const running = executor.listJobs();
+	t.is(running.length, 1);
+	t.is(running[0].jobId, executionId);
+	t.is(running[0].command, LONG_RUNNING_NODE);
+	t.false(running[0].isComplete);
+	t.true(running[0].startedAt >= startedBefore);
+	t.is(running[0].endedAt, null);
+
+	await executor.killJob(executionId);
+	const stopped = executor.listJobs();
+	t.true(stopped[0].isComplete);
+	t.truthy(stopped[0].endedAt);
+	t.true(stopped[0].endedAt! >= running[0].startedAt);
+});
+
+test('peekJobOutput shows retained output without moving the bash_output cursor', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(CHATTY_NODE, {background: true});
+
+	// The process writes its first tick asynchronously, so wait for it before
+	// checking which of two readers gets that text.
+	const deadline = Date.now() + 2000;
+	while (
+		!executor.getState(executionId)?.fullOutput.includes('tick 0') &&
+		Date.now() < deadline
+	) {
+		await new Promise(resolve => setTimeout(resolve, 25));
+	}
+	t.true(executor.getState(executionId)?.fullOutput.includes('tick 0'));
+
+	const peeked = executor.peekJobOutput(executionId)!;
+	t.true(peeked.output.includes('tick 0'), 'peeking shows retained output');
+
+	const next = executor.readJobOutput(executionId)!;
+	t.true(next.output.includes('tick 0'), 'bash_output still receives that text');
+
+	const following = executor.readJobOutput(executionId)!;
+	t.false(following.output.includes('tick 0'), 'peeking must not advance the cursor');
+
+	await executor.killJob(executionId);
+	const afterKill = executor.peekJobOutput(executionId)!;
+	t.true(afterKill.isComplete, 'peeking reports the live job status');
+	t.true(
+		afterKill.output.includes('tick 0'),
+		'output already read by bash_output remains available to /jobs',
+	);
+	t.false(
+		executor.readJobOutput(executionId)!.output.includes('tick 0'),
+		'peeking must not put consumed text back into the bash_output cursor',
+	);
+});
+
+test('peekJobOutput bounds the retained tail without consuming bash_output', async t => {
+	const executor = createExecutor();
+	const dir = mkdtempSync(join(tmpdir(), 'nc-bg-peek-'));
+	const script = join(dir, 'flood.js');
+	writeFileSync(
+		script,
+		"console.log('OLD'.repeat(1000)); console.log('NEW_MARKER');\n",
+	);
+	const {executionId, promise} = executor.execute(`node ${script}`, {
+		background: true,
+	});
+	await promise;
+
+	const peeked = executor.peekJobOutput(executionId)!;
+	t.is(peeked.output.length, BASH_JOB_PEEK_OUTPUT_LIMIT);
+	t.true(peeked.outputTruncated, 'the tail must say the log was longer');
+	t.true(
+		peeked.output.trimEnd().endsWith('NEW_MARKER'),
+		'the tail must be the latest text',
+	);
+	t.false(peeked.output.includes('OLD'.repeat(1000)));
+
+	const read = executor.readJobOutput(executionId)!;
+	t.true(read.output.includes('OLD'.repeat(1000)), 'bash_output still sees it all');
+	t.true(read.output.includes('NEW_MARKER'));
+
+	rmSync(dir, {recursive: true, force: true});
+});
+
+test('stopSessionJobs kills only the jobs owned by that session', async t => {
+	const executor = createExecutor();
+	const owned = executor.execute(LONG_RUNNING_NODE, {
+		background: true,
+		sessionId: 'session-a',
+	});
+	const other = executor.execute(LONG_RUNNING_NODE, {
+		background: true,
+		sessionId: 'session-b',
+	});
+	const ownedPid = await childPidOf(executor, owned.executionId);
+	const otherPid = await childPidOf(executor, other.executionId);
+	t.truthy(ownedPid);
+	t.truthy(otherPid);
+
+	await executor.stopSessionJobs('session-a');
+
+	t.true(await isGoneWithin(ownedPid!, 5000), 'the session job must be gone');
+	t.true(isLiveProcess(otherPid!), 'another session job must keep running');
+
+	await executor.killJob(other.executionId);
+});
+
+test('completed background jobs are pruned past the retained cap', async t => {
+	const executor = createExecutor();
+	const ids: string[] = [];
+
+	for (let i = 0; i < BASH_BACKGROUND_MAX_RETAINED_JOBS + 2; i++) {
+		const {executionId, promise} = executor.execute('echo done', {
+			background: true,
+		});
+		ids.push(executionId);
+		await promise;
+	}
+
+	t.is(
+		executor.readJobOutput(ids[0]),
+		undefined,
+		'the oldest completed job must be dropped',
+	);
+	t.truthy(
+		executor.readJobOutput(ids[ids.length - 1]),
+		'the newest completed job must still be readable',
+	);
+});
+
 
 // Runs the real singleton in its own process, then stops that process the way
 // a closed terminal, `kill`, or a forced quit would.
@@ -1098,4 +1341,32 @@ test('exit code is reported when the shell exits without a close', async t => {
 	const result = await executor.execute('sleep 5 & exit 3').promise;
 	t.is(result.exitCode, 3);
 	await executor.stopAll();
+});
+
+// ============================================================================
+// /jobs support: count for the status badge and frozen runtime
+// ============================================================================
+
+test('getRunningJobCount ignores foreground commands and completed jobs', async t => {
+	const executor = createExecutor();
+	await executor.execute('echo foreground').promise;
+	t.is(executor.getRunningJobCount(), 0);
+
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	t.truthy(await childPidOf(executor, executionId));
+	t.is(executor.getRunningJobCount(), 1);
+
+	await executor.killJob(executionId);
+	t.is(executor.getRunningJobCount(), 0);
+});
+
+test('a completed job keeps the runtime it had when it stopped', async t => {
+	const executor = createExecutor();
+	const {executionId} = executor.execute(LONG_RUNNING_NODE, {background: true});
+	t.truthy(await childPidOf(executor, executionId));
+
+	await executor.killJob(executionId);
+	const frozen = executor.listJobs()[0]!.runtimeMs;
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.is(executor.listJobs()[0]!.runtimeMs, frozen);
 });

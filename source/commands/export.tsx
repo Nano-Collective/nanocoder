@@ -7,19 +7,22 @@ import {
 } from '@/commands/export-path';
 import {ErrorMessage, SuccessMessage} from '@/components/message-box';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
-import {generateKey} from '@/session/key-generator';
 import {Command, Message} from '@/types/index';
-import {atomicWriteFile} from '@/utils/atomic-write';
 import {formatError} from '@/utils/error-formatter';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
+import {resolveFilePath} from '@/utils/fs/path-validation';
+import {writeUniqueFile} from '@/utils/fs/write-unique-file';
 import {generateExportFilename} from '@/utils/generate-export-filename';
-import {resolveFilePath} from '@/utils/path-validation';
-import {writeUniqueFile} from '@/utils/write-unique-file';
+import {generateKey} from '@/utils/key-generator';
+import {stripTurnContext} from '@/utils/turn-context';
 
 const formatMessageContent = (message: Message) => {
 	let content = '';
 	switch (message.role) {
 		case 'user':
-			content += `## User\n${message.content}`;
+			// Per-turn context was assembled for the model, not written by the
+			// user, so an exported transcript shows the message as it was typed.
+			content += `## User\n${stripTurnContext(message.content)}`;
 			break;
 		case 'assistant':
 			content += `## Assistant\n${message.content || ''}`;

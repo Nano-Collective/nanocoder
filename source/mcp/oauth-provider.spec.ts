@@ -147,6 +147,12 @@ test.serial('interactive provider reports the URL and receives the loopback code
 	t.is(badResponse.status, 400);
 	t.regex(badResponse.body, /State parameter mismatch/);
 
+	// An error callback also needs the correct state.
+	const forgedError = new URL(redirectUrl);
+	forgedError.searchParams.set('error', 'access_denied');
+	forgedError.searchParams.set('state', 'not-ours');
+	t.is((await get(forgedError)).status, 400);
+
 	// Unknown paths are 404.
 	const notFound = await get(new URL('/favicon.ico', redirectUrl));
 	t.is(notFound.status, 404);
@@ -160,6 +166,7 @@ test.serial('interactive provider reports the URL and receives the loopback code
 		get(good),
 	]);
 	t.is(code, 'the-code');
+	t.is(provider.redirectUrl?.toString(), redirectUrl.toString());
 	t.is(goodResponse.status, 200);
 	t.regex(goodResponse.body, /Signed in/);
 
@@ -237,4 +244,28 @@ test('browserOpenCommand refuses non-http(s) URLs', t => {
 	t.is(browserOpenCommand('file:///etc/passwd', 'linux'), undefined);
 	t.is(browserOpenCommand('javascript:alert(1)', 'darwin'), undefined);
 	t.is(browserOpenCommand('not a url', 'win32'), undefined);
+});
+
+
+test.serial('cancelling a callback wait closes the listener and preserves credentials', async t => {
+ const provider = new MCPOAuthProvider({serverName: 'cancel', serverUrl: 'https://cancel.example/mcp', interactive: true, openBrowser: false, forceAuthorization: true});
+ provider.saveTokens({access_token: 'working', token_type: 'Bearer'});
+ const controller = new AbortController();
+ const redirect = await provider.startCallbackListener();
+ const wait = provider.waitForAuthorizationCode(controller.signal);
+ controller.abort();
+ await t.throwsAsync(wait, {message: 'Login cancelled.'});
+ t.is(loadMCPOAuthCredential('https://cancel.example/mcp')?.tokens?.access_token, 'working');
+ await t.throwsAsync(() => get(redirect));
+});
+
+test.serial('forced login ignores saved tokens without deleting them', t => {
+ const saved = new MCPOAuthProvider({serverName: 'saved', serverUrl: 'https://saved.example/mcp'});
+ saved.saveTokens({access_token: 'working', token_type: 'Bearer'});
+ const login = new MCPOAuthProvider({serverName: 'saved', serverUrl: 'https://saved.example/mcp', forceAuthorization: true});
+ t.is(login.tokens(), undefined);
+ login.invalidateCredentials('tokens');
+ login.invalidateCredentials('all');
+ t.is(saved.tokens()?.access_token, 'working');
+ t.is(loadMCPOAuthCredential('https://saved.example/mcp')?.tokens?.access_token, 'working');
 });

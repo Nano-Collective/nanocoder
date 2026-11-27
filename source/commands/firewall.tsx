@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import {errorMsg, successMsg} from '@/components/message-factory';
 import {
 	getFirewallConfig,
 	resetFirewallConfig,
@@ -6,13 +7,15 @@ import {
 } from '@/firewall/mutation-firewall';
 import {useTheme} from '@/hooks/useTheme';
 import type {FirewallConfig, FirewallMode} from '@/types/firewall';
-import type {Command} from '@/types/index';
-import {errorMsg, successMsg} from '@/utils/message-factory';
+import type {Colors, Command} from '@/types/index';
+
+const FIREWALL_SUBCOMMANDS =
+	'status, enable, disable, mode, toggle, protect, unprotect, reset';
 
 export const firewallCommand: Command = {
 	name: 'firewall',
 	description:
-		'Configure negative-space mutation firewall. Subcommands: status, mode <strict|lenient|disabled>, toggle <any|tests|exports>, protect <pattern>, unprotect <pattern>, reset',
+		'Guard file edits: block (strict) or warn about (lenient) edits that delete tests, change exported signatures, add `any` types or touch protected paths. Subcommands: status, enable, disable, mode, toggle, protect, unprotect, reset',
 	handler: async (args: string[]) => {
 		if (args.length === 0 || args[0] === 'status') {
 			const config = getFirewallConfig();
@@ -21,6 +24,7 @@ export const firewallCommand: Command = {
 
 		const subCommand = args[0]?.toLowerCase();
 
+		// `enable` / `disable` are shorthands for `mode strict` / `mode disabled`.
 		if (subCommand === 'enable') {
 			setFirewallConfig({mode: 'strict', enabled: true});
 			return successMsg("Firewall enabled in 'strict' mode.", 'firewall');
@@ -122,21 +126,39 @@ export const firewallCommand: Command = {
 		}
 
 		return errorMsg(
-			`Unknown subcommand: '${subCommand}'. Available subcommands: status, mode, toggle, protect, unprotect, reset`,
+			`Unknown subcommand: '${subCommand}'. Available subcommands: ${FIREWALL_SUBCOMMANDS}`,
 			'firewall',
 		);
 	},
 };
 
+/**
+ * Theme colours for the status view, so it follows the active theme (and
+ * stays readable on light ones) instead of hard-coding terminal colour names.
+ */
+export function getFirewallStatusColors(
+	config: FirewallConfig,
+	colors: Colors,
+) {
+	const onOff = (on: boolean) => (on ? colors.success : colors.error);
+	return {
+		status: onOff(config.enabled),
+		mode:
+			config.mode === 'strict'
+				? colors.primary
+				: config.mode === 'lenient'
+					? colors.warning
+					: colors.secondary,
+		blockAnyTypes: onOff(config.blockAnyTypes),
+		protectTestCases: onOff(config.protectTestCases),
+		preserveExportSignatures: onOff(config.preserveExportSignatures),
+		patternBullet: colors.warning,
+	};
+}
+
 function FirewallStatusView({config}: {config: FirewallConfig}) {
 	const {colors} = useTheme();
-
-	const modeColor =
-		config.mode === 'strict'
-			? colors.primary
-			: config.mode === 'lenient'
-				? 'yellow'
-				: 'gray';
+	const statusColors = getFirewallStatusColors(config, colors);
 
 	return (
 		<Box
@@ -153,13 +175,13 @@ function FirewallStatusView({config}: {config: FirewallConfig}) {
 			<Box flexDirection="column">
 				<Text>
 					Status:{' '}
-					<Text color={config.enabled ? 'green' : 'red'} bold>
+					<Text color={statusColors.status} bold>
 						{config.enabled ? 'ENABLED' : 'DISABLED'}
 					</Text>
 				</Text>
 				<Text>
 					Mode:{' '}
-					<Text color={modeColor} bold>
+					<Text color={statusColors.mode} bold>
 						{config.mode.toUpperCase()}
 					</Text>
 				</Text>
@@ -171,19 +193,19 @@ function FirewallStatusView({config}: {config: FirewallConfig}) {
 				</Text>
 				<Text>
 					• Block explicit 'any' types:{' '}
-					<Text color={config.blockAnyTypes ? 'green' : 'red'}>
+					<Text color={statusColors.blockAnyTypes}>
 						{config.blockAnyTypes ? 'ON' : 'OFF'}
 					</Text>
 				</Text>
 				<Text>
 					• Protect existing test cases:{' '}
-					<Text color={config.protectTestCases ? 'green' : 'red'}>
+					<Text color={statusColors.protectTestCases}>
 						{config.protectTestCases ? 'ON' : 'OFF'}
 					</Text>
 				</Text>
 				<Text>
 					• Preserve exported API signatures:{' '}
-					<Text color={config.preserveExportSignatures ? 'green' : 'red'}>
+					<Text color={statusColors.preserveExportSignatures}>
 						{config.preserveExportSignatures ? 'ON' : 'OFF'}
 					</Text>
 				</Text>
@@ -196,7 +218,7 @@ function FirewallStatusView({config}: {config: FirewallConfig}) {
 				{config.protectedPatterns.map((pattern, idx) => (
 					<Text key={idx}>
 						{' '}
-						<Text color="yellow">•</Text> {pattern}
+						<Text color={statusColors.patternBullet}>•</Text> {pattern}
 					</Text>
 				))}
 			</Box>

@@ -1,7 +1,7 @@
 import test from 'ava';
 import {substituteEnvVars} from './env-substitution';
 
-// Mock logError to avoid console noise during tests
+// Mock notifyError to avoid console noise during tests
 const originalConsoleError = console.error;
 test.before(() => {
 	console.error = () => {};
@@ -62,11 +62,33 @@ test('substituteEnvVars - handles mixed braced and unbraced vars', t => {
 	delete process.env.VAR2;
 });
 
-test('substituteEnvVars - keeps default value when env var is set but empty', t => {
+test('substituteEnvVars - uses default value when env var is set but empty', t => {
 	process.env.EMPTY_VAR = '';
 	const result = substituteEnvVars('${EMPTY_VAR:-default}');
-	t.is(result, '');
+	t.is(result, 'default');
 	delete process.env.EMPTY_VAR;
+});
+
+test('substituteEnvVars - empty env var falls back to default inside a URL', t => {
+	process.env.LOCAL_LLM_URL = '';
+	const result = substituteEnvVars({
+		baseUrl: '${LOCAL_LLM_URL:-http://127.0.0.1:8080/v1}',
+	});
+	t.deepEqual(result, {baseUrl: 'http://127.0.0.1:8080/v1'});
+	delete process.env.LOCAL_LLM_URL;
+});
+
+test('substituteEnvVars - braced and unbraced vars keep an empty value', t => {
+	process.env.EMPTY_VAR = '';
+	t.is(substituteEnvVars('[${EMPTY_VAR}]'), '[]');
+	t.is(substituteEnvVars('[$EMPTY_VAR]'), '[]');
+	delete process.env.EMPTY_VAR;
+});
+
+test('substituteEnvVars - non-empty env var still wins over the default', t => {
+	process.env.SET_VAR = 'value';
+	t.is(substituteEnvVars('${SET_VAR:-default}'), 'value');
+	delete process.env.SET_VAR;
 });
 
 test('substituteEnvVars - default value with special characters', t => {
@@ -257,4 +279,54 @@ test('substituteEnvVars - complex config object', t => {
 	delete process.env.HOST;
 	delete process.env.PORT;
 	delete process.env.USER;
+});
+
+// ============================================================================
+// Escaped Dollar Tests ($$)
+// ============================================================================
+
+test('substituteEnvVars - supports $$ escape sequence for literal $', t => {
+	const result = substituteEnvVars('pa$$WORD');
+	t.is(result, 'pa$WORD');
+});
+
+test('substituteEnvVars - preserves literal $ in secrets and api keys', t => {
+	const result = substituteEnvVars('sk-$$ECRET-key');
+	t.is(result, 'sk-$ECRET-key');
+});
+
+test('substituteEnvVars - preserves $$ in args and strings', t => {
+	const result = substituteEnvVars('price $$USD 5');
+	t.is(result, 'price $USD 5');
+});
+
+test('substituteEnvVars - handles $$ with valid env var substitution', t => {
+	process.env.TEST_FOO = 'bar';
+	const result = substituteEnvVars('$$TEST_FOO is $TEST_FOO');
+	t.is(result, '$TEST_FOO is bar');
+	delete process.env.TEST_FOO;
+});
+
+test('substituteEnvVars - handles consecutive $$ escapes', t => {
+	const result = substituteEnvVars('$$$$');
+	t.is(result, '$$');
+});
+
+test('substituteEnvVars - supports $$ escape in default values', t => {
+	const result = substituteEnvVars('${MISSING_VAR:-pa$$WORD}');
+	t.is(result, 'pa$WORD');
+});
+
+test('substituteEnvVars - preserves $VAR in default values without expanding', t => {
+	const result = substituteEnvVars('${MISSING_VAR:-literal $NOT_EXPANDED}');
+	t.is(result, 'literal $NOT_EXPANDED');
+});
+
+test('substituteEnvVars - prevents prototype pollution with __proto__ key', t => {
+	const malicious = JSON.parse('{"__proto__": {"polluted": true}, "valid": "data"}');
+	const result = substituteEnvVars(malicious) as Record<string, unknown>;
+	t.is(result.valid, 'data');
+	t.is(result.polluted, undefined, 'the result must not inherit the injected key');
+	t.is(Object.getPrototypeOf(result), Object.prototype, 'the prototype must be intact');
+	t.false(Object.hasOwn(result, '__proto__'), 'the hostile key must not become an own property');
 });

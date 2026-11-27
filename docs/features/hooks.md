@@ -121,7 +121,7 @@ Surfaces:
 
 - `pre-tool-use` and `post-tool-use` fire everywhere tools run: the interactive TUI (including streamed `execute_bash`), `nanocoder run`, the `--plain` shell, ACP, and subagents.
 - `post-tool-use` fires for every call that produces a result, successful or not — a handler that threw, a validation failure, malformed arguments. An audit-log hook therefore sees the failures too, which is usually the point. A call refused by `pre-tool-use` is the one exception: it never ran, so `post-tool-use` does not fire for it.
-- `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI and in `run` / `--plain`. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. ACP sessions are driven by the editor and fire the tool hooks only.
+- `session-start`, `session-end`, and `user-prompt-submit` fire in the interactive TUI, in `run` / `--plain`, and in ACP. In `run`, the prompt on the command line is the submitted prompt, and a veto exits 1 before any model call. In ACP each editor chat is a session: `session-start` fires when the chat is created, loaded or resumed, `session-end` when the editor closes or deletes it (and at shutdown for any still open), and a `user-prompt-submit` veto ends that prompt with the stop reason `refusal` before any model call.
 - `pre-compact` fires for automatic compaction and for `/compact`.
 
 ### `session-end` runs on a shutdown budget

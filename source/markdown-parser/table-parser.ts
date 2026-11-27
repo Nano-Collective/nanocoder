@@ -27,12 +27,14 @@ export function parseMarkdownTable(
 	const lines = tableText.trim().split('\n');
 	if (lines.length < 2) return tableText;
 
-	// Extract rows
+	// Extract rows (strip only optional outer pipes so empty inner cells are preserved)
 	const rows = lines.map(line =>
 		line
+			.trim()
+			.replace(/^\|/, '')
+			.replace(/\|$/, '')
 			.split('|')
-			.map(cell => cell.trim())
-			.filter(cell => cell.length > 0),
+			.map(cell => cell.trim()),
 	);
 
 	// Check if second row is separator (e.g., |---|---|)
@@ -83,6 +85,8 @@ export function parseMarkdownTable(
 
 	// Distribute width proportionally
 	const totalContentWidth = contentWidths.reduce((a, b) => a + b, 0);
+	if (totalContentWidth === 0) return tableText;
+
 	const colWidths = contentWidths.map(width =>
 		Math.max(
 			TABLE_COLUMN_MIN_WIDTH,

@@ -239,13 +239,26 @@ echo`,
 	t.throws(() => parseCustomToolFile(path), {message: /pattern/});
 });
 
+test('accepts timeout_ms at the two hour cap', t => {
+	const path = writeTool(
+		'two-hour-timeout.md',
+		`---
+name: x
+description: foo
+timeout_ms: 7200000
+---
+echo`,
+	);
+	t.is(parseCustomToolFile(path).metadata.timeoutMs, 7_200_000);
+});
+
 test('throws on timeout_ms over the cap', t => {
 	const path = writeTool(
 		'long-timeout.md',
 		`---
 name: x
 description: foo
-timeout_ms: 600000
+timeout_ms: 7200001
 ---
 echo`,
 	);
@@ -266,4 +279,39 @@ echo`,
 	);
 	const meta = parseCustomToolFile(path).metadata;
 	t.deepEqual(meta.env, {FOO: 'bar', BAZ: 'qux'});
+});
+
+test('rejects a body that puts a placeholder inside quotes', t => {
+	const path = writeTool(
+		'quoted.md',
+		`---
+name: search
+description: Search.
+shell: bash
+parameters:
+  q:
+    type: string
+---
+grep -r "{{ q }}" .`,
+	);
+	const error = t.throws(() => parseCustomToolFile(path), {
+		instanceOf: CustomToolParseError,
+	});
+	t.regex(error?.message ?? '', /\{\{ q \}\} is inside a "\.\.\." string/);
+});
+
+test('accepts the same body with a bare placeholder', t => {
+	const path = writeTool(
+		'bare.md',
+		`---
+name: search
+description: Search.
+shell: bash
+parameters:
+  q:
+    type: string
+---
+grep -r {{ q }} .`,
+	);
+	t.is(parseCustomToolFile(path).metadata.name, 'search');
 });

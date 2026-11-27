@@ -18,7 +18,7 @@ import {basename, isAbsolute, join, relative} from 'node:path';
 import {TRUNCATION_OUTPUT_LIMIT} from '@/constants';
 import {shellQuote} from '@/custom-tools/template';
 import type {BashExecutionState} from '@/services/bash-executor';
-import {truncateToolResult} from '@/utils/truncate-tool-result';
+import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 
 export type FailureRunner = 'jest' | 'vitest' | 'mocha' | 'ava' | 'tsc';
 

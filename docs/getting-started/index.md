@@ -44,28 +44,30 @@ nanocoder -h
 |--------|-------|-------------|
 | `--version` | `-v` | Display the installed version number |
 | `--help` | `-h` | Show usage information and available options |
-| `--vscode` | | Run in VS Code mode (for extension) |
+| `--profile <name>` | | Use a named configuration profile from agents.config.json (e.g. `--profile fast`) |
+| `--vscode` | | **Deprecated.** Start the legacy VS Code companion (WebSocket). It will be removed in a future release; the [VS Code extension](../features/vscode-extension.md) now runs the agent itself over ACP |
 | `--vscode-port` | | Ask for a specific VS Code server port. By default it binds an ephemeral port and publishes it to a discovery file the extension reads, so this is only needed when you want a known port (e.g. for port forwarding). If the requested port is busy, the next 10 ports are tried in turn and the one actually bound is written to the discovery file and the log |
 | `--acp` | | Run as an [ACP server](../features/acp.md) for editor integration (Zed, etc.) |
 | `--provider` | | Specify AI provider by its configured name (must be configured in agents.config.json). Quote names with spaces, e.g. `--provider "GitHub Copilot"` |
 | `--model` | | Specify AI model (must be available for the provider) |
 | `--plain` | | Use the lightweight, Ink-free runtime for non-interactive runs. Requires `run`; auto-enables in CI and non-TTY environments |
 | `--no-plain` | | Force the Ink runtime even in CI and non-TTY environments |
-| `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Requires `run` and always uses the plain runtime, even in a terminal; incompatible with `--no-plain`, `--acp`, `--vscode` and `review` |
+| `--json` | | Emit a single structured JSON object to `stdout` on completion instead of streamed text. Supported by `run` and `review`, even in a terminal: `run` uses the plain runtime and `review` runs headless. Incompatible with `--acp` and `--vscode`; `run --json` is also incompatible with `--no-plain` |
 | `--output-format` | | Set the `stdout` format, `text` or `json`. Synonym for `--json` |
-| `--context-max` | | Set maximum context length in tokens (supports k/K suffix, e.g. `128k`) |
+| `--json-schema <file|JSON>` | | Validate the final answer from `run` against a JSON Schema file or inline JSON. Invalid answers are retried; always uses the plain runtime |
+| `--context-max` | | Set maximum context length in tokens (supports positive integer or decimal values, k/K, and m/M suffixes) |
 | `--mode` | | Start in a specific [development mode](../features/development-modes.md) - `normal`, `auto-accept`, `yolo`, `plan`, or `architect`. Defaults to `auto-accept` for `run` mode; interactive sessions use `defaultMode` from `agents.config.json` if set, otherwise `normal`. |
-| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
+| `--trust-directory` | | Skip the first-run directory trust prompt for this run only. Valid with `run`, `review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; ignored (with a warning) in interactive mode. The trust is ephemeral - `trustedDirectories` in your preferences file is not modified. See [Directory trust](#directory-trust) |
 | `--alt-screen` | | Start in fullscreen mode: a fixed-height layout on the alternate screen buffer with in-app scrolling (enabled by default). |
 | `--no-alt-screen` | | Disable fullscreen mode and force inline mode (main screen, chat history in the terminal's native scrollback). |
 | `--mouse` | | In fullscreen mode, the mouse wheel scrolls the chat viewport; select text with Shift+drag (Option+drag in iTerm2). Enabled by default. |
 | `--no-mouse` | | Disable mouse reporting in fullscreen mode: native text selection works directly, but the wheel no longer scrolls chat history. |
-| `--prompt-file <path>` | | Read the `run` prompt from a file instead of the command line. Takes precedence over a positional prompt. Use it for large prompts: Linux caps a single argument at 128 KiB, and anything bigger fails to launch with `E2BIG`. Only valid with `run`. |
+| `--prompt-file <path>` | | Read the `run` prompt from a file instead of the command line. Takes precedence over a positional prompt. Pass `-` to read it from stdin (`git diff \| nanocoder run --prompt-file -`). Use it for large prompts: Linux caps a single argument at 128 KiB, and anything bigger fails to launch with `E2BIG`. Only valid with `run`. |
 | `--continue` | `-c` | Resume the most recent [saved session](../features/session-management.md) for the current directory; starts a fresh session if none exists. Interactive only — errors with `run`. Mutually exclusive with `--resume`. |
 | `--resume [id]` | `-r` | Resume a [saved session](../features/session-management.md) by session ID, 1-based list index, or `last`. With no ID, opens the session picker at startup. Errors if the session is not found. Interactive only — errors with `run`. |
 | `init [--preset <type>] [-f\|--force] [--lean]` | | Initialize the current project. Bundled presets: `react`, `nextjs`, and `rust`. `--force` regenerates an existing `AGENTS.md`; `--lean` skips `CLAUDE.md` when merging existing project guidance |
 | `run` | | Run in non-interactive mode |
-| `review` | | Review a branch or PR diff for bugs, security, and style violations |
+| `review` | | Grounded review of a branch or PR: findings must cite lines on or near the change (within three lines, or at a deletion boundary) and pass an independent verifier. See [code review](../features/review.md) |
 | `worktree <PR-number>` | | Start an interactive session in a new Git worktree at a PR's head |
 | `daemon <start\|stop\|status\|logs\|install\|uninstall>` | | Manage the per-project [skill daemon](../features/skills.md#the-daemon). `start` refuses an untrusted directory unless `--trust-directory` is passed |
 | `skills add <target>` | | Install a skill bundle from an index name, `owner/repo`, a git URL or a local path. Flags: `--ref`, `--subdir`, `--global`, `--force`, `--yes`, `--index` |
@@ -188,6 +190,7 @@ nanocoder --provider openrouter --model google/gemini-3.1-flash run "analyze src
 
 # With context limit override (useful when model context isn't auto-detected)
 nanocoder --provider ollama --model llama3.1 --context-max 128k run "analyze src/app.ts"
+nanocoder --provider ollama --model llama3.1 --context-max 1m run "analyze src/app.ts"
 
 # Flags after 'run' command
 nanocoder run --provider openrouter --model anthropic/claude-sonnet-4-20250514 "refactor database module"
@@ -206,9 +209,9 @@ nanocoder review feature/auth
 nanocoder review 42
 ```
 
-This fetches the diff against the default branch and runs an architect-level review identifying bugs, security issues, and style violations. You can also use `/review <target>` inside the interactive TUI. This is a deliberate v1 — diff-only, one-shot review with no file reads (see [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287) for the planned agentic tier).
+This runs a grounded review of the target against the default branch: an agent inspects the pinned revision with read-only tools, and only issues that cite lines on or near the change (within three lines, or at a deletion boundary) and pass an independent verifier are reported. You can also use `/review <target>` inside the interactive TUI, or `/review quick <target>` for the one-shot diff review. See [code review](../features/review.md).
 
-**Note:** `nanocoder review` requires an interactive terminal (TTY). It cannot be used with pipes or redirection (e.g. `nanocoder review main > review.md` will error) and its output cannot currently be captured to a file (also tracked in [#1287](https://github.com/Nano-Collective/nanocoder/issues/1287)).
+**Note:** On a terminal, `nanocoder review` opens the interactive session. Piped, redirected, or CI runs print the report on stdout and progress on stderr (`nanocoder review main > review.md`). Add `--output-format json` for the structured result. The exit code is `0` for a completed review, `2` for an incomplete one, and `1` when no review was produced. Headless review uses the same directory trust check as `nanocoder run`: pass `--trust-directory` or set `NANOCODER_TRUST_DIRECTORY=1` in a directory you have not trusted yet. See [code review](../features/review.md).
 
 ### Work on a pull request
 
@@ -230,7 +233,8 @@ An existing directory or local branch causes an error; Nanocoder never overwrite
 - Tools render chronologically as they run (e.g. `⚒ Read 1 file`) and appear in stdout before the assistant's next response
 - If a tool requires approval that auto-accept won't grant (e.g. bash or a `file_op` delete in `--mode auto-accept`, or any approval-gated tool in `--mode normal`), nanocoder prints `Tool approval required for: ...` and exits with status code `1` (`2` under `--plain`, including JSON output). This means a `run` will not execute shell commands by default: pass `--mode yolo`, or pre-approve the tool in `agents.config.json` with `{"nanocoder": {"alwaysAllow": ["execute_bash"]}}`. The `alwaysAllow` key must be inside the `nanocoder` object; a top-level `alwaysAllow` is ignored
 - Exits with status code `1` when the run fails: a provider or connection error, a retry limit being hit (e.g. malformed tool calls the model cannot self-correct), or the run timing out
-- Exits with status code `1` with a usage message if `run` is given no prompt (or an empty `--prompt-file`)
+- Reads piped stdin (up to 100,000 characters) into the prompt: appended to a positional prompt, or used as the prompt when there is none. See [Piping Input](../features/commands.md#piping-input)
+- Exits with status code `1` with a usage message if `run` is given no prompt and nothing is piped (or an empty `--prompt-file`)
 - Exits automatically when the task is complete
 - Uses specified provider/model if `--provider` and `--model` flags are provided
 - Respects `--context-max` flag or `NANOCODER_CONTEXT_LIMIT` env var for context limit override
@@ -253,13 +257,13 @@ The first time Nanocoder runs in a new directory, it shows a security disclaimer
 
 In CI/CD or scripted contexts there's no one to confirm, so non-interactive runs would hang on the prompt. There are three ways around it:
 
-- **`--trust-directory`** trusts the folder for one run only and saves nothing. It applies to `run`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; in interactive mode it prints a warning and is ignored.
+- **`--trust-directory`** trusts the folder for one run only and saves nothing. It applies to `run`, `nanocoder review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`; in interactive mode it prints a warning and is ignored.
 
   ```bash
   nanocoder --trust-directory run "your prompt here"
   ```
 
-- **`NANOCODER_TRUST_DIRECTORY=1`** trusts the folder and saves it to `trustedDirectories`, so later runs no longer need it. It is honoured by the interactive TUI, `run` (including `--plain`), `nanocoder daemon start`, `nanocoder verify` and `--acp`. Set it in your shell: a project `.env` cannot set it.
+- **`NANOCODER_TRUST_DIRECTORY=1`** trusts the folder and saves it to `trustedDirectories`, so later runs no longer need it. It is honoured by the interactive TUI, `run` (including `--plain`), headless `nanocoder review`, `nanocoder daemon start`, `nanocoder verify` and `--acp`. Set it in your shell: a project `.env` cannot set it.
 - **`nanocoder trust`** checks or grants trust without starting anything from the folder. `nanocoder trust --status` (add `--json` for machine output) prints the status (`trusted`, `not-trusted`, `changed` or `needs-re-approval`), what the folder will run, and its fingerprint. After reviewing that, `nanocoder trust --grant <fingerprint>` saves trust, and fails if the folder changed since the fingerprint was taken.
 
 ## Next Steps

@@ -163,6 +163,21 @@ test('updateMessages updates messages', t => {
 	t.deepEqual(captured!.messages, msgs);
 });
 
+test('appendMessages uses the latest updates before React rerenders', t => {
+	const {hook, instance} = setup();
+	const original: Message = {role: 'user', content: 'original'};
+	const intervening: Message = {role: 'user', content: 'intervening'};
+	const review: Message = {role: 'assistant', content: 'review'};
+	hook.updateMessages([original]);
+	hook.setLastApiUsage({inputTokens: 1000, outputTokens: 200, atMessageCount: 1});
+	hook.appendMessages([intervening]);
+	hook.appendMessages([review]);
+	instance.rerender(<Probe />);
+	t.deepEqual(captured!.messages, [original, intervening, review]);
+	t.not(captured!.lastApiUsage, null);
+	t.is(captured!.appendMessages, hook.appendMessages);
+});
+
 test('updateMessages preserves the API usage snapshot across an in-conversation append', t => {
 	const {hook, instance} = setup();
 
@@ -508,4 +523,28 @@ test('setLiveTaskList does not mark unread while the list is expanded', t => {
 
 	t.true(captured!.showTaskList);
 	t.false(captured!.taskListHasUnread);
+});
+
+test('the returned object keeps its identity across a render with no state change', t => {
+	const {hook, instance} = setup();
+	const rendersAfterMount = renderCount;
+
+	instance.rerender(<Probe />);
+
+	// The Probe really did render again; only the hook's result was reused.
+	t.true(renderCount > rendersAfterMount);
+	t.is(captured, hook);
+});
+
+test('the returned object gets a new identity when a value in it changes', t => {
+	const {hook, instance} = setup();
+
+	hook.setIsSettingsMode(true);
+	instance.rerender(<Probe />);
+
+	t.not(captured, hook);
+	t.true(captured!.isSettingsMode);
+	// Stable members carry over to the new object unchanged.
+	t.is(captured!.setIsSettingsMode, hook.setIsSettingsMode);
+	t.is(captured!.addToChatQueue, hook.addToChatQueue);
 });
