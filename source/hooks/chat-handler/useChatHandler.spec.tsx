@@ -10,6 +10,7 @@ import {
 } from '@/config/preferences';
 import {setToolRegistryGetter} from '@/message-handler';
 import {getLastBuiltPrompt} from '@/conversation/prompt-builder';
+import {appendTurnContext, stripTurnContext} from '@/utils/turn-context';
 import {getBaseSystemPrompt, useChatHandler} from './useChatHandler';
 import type {UseChatHandlerProps, ChatHandlerReturn} from './types';
 import type {LLMClient, Message} from '../../types/core';
@@ -840,6 +841,75 @@ test('useChatHandler - handleChatMessage splices historyMessages ahead of the ne
 			{role: 'user', content: 'real question'},
 		],
 	);
+});
+
+test('useChatHandler - replaces the old turn and sends the retry notice to the model', async t => {
+	const earlier: Message[] = [
+		{role: 'user', content: 'Earlier request'},
+		{role: 'assistant', content: 'Earlier response'},
+	];
+	const messages: Message[] = [
+		...earlier,
+		{role: 'user', content: 'Check the build'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'old', function: {name: 'read_file', arguments: {path: 'build.log'}}},
+			],
+		},
+		{role: 'tool', name: 'read_file', tool_call_id: 'old', content: 'Old result'},
+		{role: 'assistant', content: 'Old response'},
+	];
+	const client = createMockClient();
+	const chat = client.chat;
+	let providerMessages: Message[] = [];
+	client.chat = async (request, ...args) => {
+		providerMessages = request.filter(message => message.role !== 'system');
+		return chat(request, ...args);
+	};
+	let hookResult: ChatHandlerReturn | null = null;
+	let savedMessages: Message[] = [];
+	const app = render(
+		<TestHookComponent
+			{...createMockProps({
+				client,
+				toolManager: createMockToolManager(),
+				messages,
+				setMessages: updated => {
+					savedMessages = updated;
+				},
+			})}
+			onResult={result => {
+				hookResult = result;
+			}}
+		/>,
+	);
+	try {
+		await waitForCondition(() => hookResult !== null);
+		await hookResult!.handleChatMessage(
+			'Check the build',
+			undefined,
+			undefined,
+			undefined,
+			2,
+		);
+		const expectedPrompt = appendTurnContext('Check the build', [
+			'[Retry: Any file edits from the previous attempt are still on disk. Reread files before editing and check which changes have already been applied.]',
+		]);
+		const retried: Message[] = [
+			...earlier,
+			{role: 'user', content: expectedPrompt},
+		];
+		t.deepEqual(providerMessages, retried);
+		t.is(stripTurnContext(providerMessages.at(-1)?.content ?? ''), 'Check the build');
+		t.deepEqual(
+			savedMessages.map(({role, content}) => ({role, content})),
+			[...retried, {role: 'assistant', content: 'ok'}],
+		);
+	} finally {
+		app.unmount();
+	}
 });
 
 // The signal must be scoped to plan mode — a normal-mode turn completing must

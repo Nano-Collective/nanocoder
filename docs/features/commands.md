@@ -48,7 +48,7 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/repomap` | Show a PageRank-ordered map of the codebase - the most-referenced files and the symbols they define. Use `/repomap --tokens <n>` to widen the map beyond its default 1024-token budget |
 | `/skills` | List and inspect loaded skills. Subcommands: `show <name>`, `create <name>` (scaffold a bundle with AI assistance), `check <name>` (validate a bundle), `promote <name>` (copy a project skill to your personal config) and `demote <name>` (copy a personal skill into the project); `promote`/`demote` accept `--force` and `--move`. `/skills schedule` is a read-only view of the cron subscriptions skills declare (see [Skills → Event subscriptions](skills.md#event-subscriptions)) |
 | `/resume` | Resume a previous chat session (aliases: `/sessions`, `/history`). Also available at launch via the `--resume`/`--continue` CLI flags. See [Session Management](session-management.md) |
-| `/retry` | Re-run the last user turn. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
+| `/retry` | Re-run your last prompt and replace its previous attempt in conversation history. Use `/retry --model <id>` or `/retry --provider <name> --model <id>` to switch models first |
 | `/rename` | Rename the current session. Name must be non-empty and 100 characters or less. See [Session Management](session-management.md) |
 | `/explorer` | Interactive file browser to navigate, preview, and select files for context |
 | `/tune` | Configure runtime model behaviour — tool profiles, compaction, native tools, model parameters (see [Tune](tune.md)) |
@@ -60,6 +60,8 @@ Type `/` in the chat input to see available commands. All commands start with `/
 | `/voice` | Configure [Voice Mode](voice-mode.md) (`/voice [on\|off\|hands-free\|ptt\|stt <local\|cloud>\|tts <local\|cloud>\|status\|mode <push-to-talk\|hands-free>]`) |
 
 `/tip`, `/privacy` and `/credits` work as listed but are left out of the `/help` overview; `/help <command>` still shows their details.
+
+After you approve a plan, `/retry` reruns the implementation. Any `!cmd` output after the retried prompt is dropped from conversation history. File edits from the previous attempt remain on disk.
 
 ### Renamed Commands
 

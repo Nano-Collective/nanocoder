@@ -94,6 +94,31 @@ function wait(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+test.serial('/retry forwards the replacement boundary and attachments to chat', async t => {
+	const images = [{data: 'aW1hZ2U=', mediaType: 'image/png'}];
+	const messages: Message[] = [
+		{role: 'user', content: 'Previous prompt'},
+		{role: 'assistant', content: 'Previous response'},
+		{role: 'user', content: 'Describe this image', images},
+		{role: 'assistant', content: 'Old attempt'},
+	];
+	const calls: Parameters<MessageSubmissionOptions['onHandleChatMessage']>[] = [];
+
+	await dispatchSlashCommand(
+		'/retry',
+		createOptions({
+			messages,
+			onHandleChatMessage: async (...args) => {
+				calls.push(args);
+			},
+		}),
+	);
+
+	t.deepEqual(calls, [
+		['Describe this image', 'Describe this image', images, undefined, 2],
+	]);
+});
+
 test.serial('a stateful command gets its args and the app state in a context', async t => {
 	const messages: Message[] = [{role: 'user', content: 'hi'}];
 	let completed = 0;

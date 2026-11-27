@@ -3520,5 +3520,6 @@ test.serial('a subagent nudges an empty reply instead of returning it', async t 
 	t.deepEqual(sent[1].at(-1), {
 		role: 'user',
 		content: 'Please continue with the task.',
+		synthetic: true,
 	});
 });

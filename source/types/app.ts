@@ -41,6 +41,7 @@ export interface MessageSubmissionOptions {
 		displayValue?: string,
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
+		replaceFrom?: number,
 	) => Promise<void>;
 	onSwitchModel?: (provider: string, model: string) => Promise<boolean>;
 	onSwitchMode?: (mode: DevelopmentMode) => void;

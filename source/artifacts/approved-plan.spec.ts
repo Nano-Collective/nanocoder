@@ -2,6 +2,7 @@ import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {appendTurnContext} from '@/utils/turn-context';
 import {ArtifactManager} from './artifact-manager';
 import {
 	createApprovedPlanMessage,
@@ -90,4 +91,10 @@ test('an invalid session id degrades instead of throwing', async t => {
 
 test('the degraded approval message is still recognised as synthetic', t => {
 	t.true(isApprovedPlanMessage({role: 'user', content: FALLBACK_MESSAGE}));
+	t.true(
+		isApprovedPlanMessage({
+			role: 'user',
+			content: appendTurnContext(FALLBACK_MESSAGE, ['Retry notice']),
+		}),
+	);
 });

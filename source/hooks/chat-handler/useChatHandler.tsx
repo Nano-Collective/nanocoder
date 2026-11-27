@@ -20,6 +20,7 @@ import {buildProjectContextSection} from '@/memory/project-context';
 import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
 import {processToolUse} from '@/message-handler';
 import {appendActivePlanContext} from '@/plans/context';
+import {bumpReadContentGeneration} from '@/tools/runtime/read-tracker';
 import {getTuneToolMode} from '@/types/config';
 import type {ImageAttachment, Message} from '@/types/core';
 import {generateKey} from '@/utils/key-generator';
@@ -361,6 +362,7 @@ export function useChatHandler({
 		displayValue?: string,
 		images?: ImageAttachment[],
 		historyMessages?: Message[],
+		replaceFrom?: number,
 	) => {
 		if (!client || !toolManager) {
 			// handleMessageSubmit marks a turn as incomplete before reaching this
@@ -440,6 +442,9 @@ export function useChatHandler({
 		const messageWithContext = appendTurnContext(message, [
 			skillsSection,
 			projectContext.content,
+			replaceFrom === undefined
+				? undefined
+				: '[Retry: Any file edits from the previous attempt are still on disk. Reread files before editing and check which changes have already been applied.]',
 		]);
 
 		if (projectContext.memoryCount > 0) {
@@ -455,13 +460,17 @@ export function useChatHandler({
 		// caller-supplied historyMessages (e.g. the preceding turns of a
 		// multi-message MCP prompt) are spliced in first, preserving their
 		// original roles, so a few-shot prompt keeps its turn structure
-		// instead of being flattened into this one user message.
-		const builder = new MessageBuilder(messages);
+		// instead of being flattened into this one user message. A retry replaces
+		// the discarded tail in the same update that adds the replacement prompt.
+		const builder = new MessageBuilder(
+			replaceFrom === undefined ? messages : messages.slice(0, replaceFrom),
+		);
 		for (const historyMessage of historyMessages ?? []) {
 			builder.addMessage(historyMessage);
 		}
 		builder.addUserMessage(messageWithContext, images);
 		const updatedMessages = builder.build();
+		if (replaceFrom !== undefined) bumpReadContentGeneration();
 		setMessages(updatedMessages);
 
 		// Initialize conversation state if this is a new conversation

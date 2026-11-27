@@ -488,7 +488,11 @@ test('emptyTurnNudge words the nudge, and onEmptyRetry is told it', async t => {
 	});
 	await run();
 	t.deepEqual(retries, [[1, 'nudge after 1']]);
-	t.deepEqual(requests[1].at(-1), {role: 'user', content: 'nudge after 1'});
+	t.deepEqual(requests[1].at(-1), {
+		role: 'user',
+		content: 'nudge after 1',
+		synthetic: true,
+	});
 });
 
 test('onEmptyTurnsExhausted can replace history and reset the guards', async t => {

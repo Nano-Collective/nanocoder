@@ -1,5 +1,14 @@
+import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {errorMsg} from '@/components/message-factory';
+import {
+	ARCHITECT_REVERT_NOTICE_PREFIX,
+	BASH_OUTPUT_PREFIX,
+	COMPACTION_RETRY_NOTICE,
+} from '@/constants';
 import {parseCustomCommandArgs} from '@/custom-commands/args';
+import {isAutoDiagnosticsMessage} from '@/hooks/chat-handler/conversation/auto-diagnostics';
+import {isTurnRecoveryNotice} from '@/hooks/chat-handler/utils/headless-retry-guards';
+import {isEvidenceRejectionMessage} from '@/services/completion-ledger';
 import type {Message, StatefulCommand} from '@/types/index';
 import {stripTurnContext} from '@/utils/turn-context';
 
@@ -8,11 +17,31 @@ interface RetryArgs {
 	provider?: string;
 }
 
-function findLastUserMessage(messages: Message[]) {
+function findRetryTarget(messages: Message[]) {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		const message = messages[index];
-		if (message?.role === 'user' && message.content.trim()) {
-			return message;
+		if (
+			message?.role !== 'user' ||
+			message.displayOnly ||
+			message.synthetic ||
+			// Legacy shell output is formatted in source/app/utils/app-util.ts.
+			message.content.startsWith(BASH_OUTPUT_PREFIX + '\n```\n$ ') ||
+			message.content.startsWith(ARCHITECT_REVERT_NOTICE_PREFIX) ||
+			message.content === COMPACTION_RETRY_NOTICE ||
+			// Summaries are formatted in source/conversation/compaction/llm-summariser.ts.
+			message.content.startsWith('<conversation-summary>\n') ||
+			isTurnRecoveryNotice(message.content) ||
+			isInternalWalkthroughMessage(message) ||
+			isAutoDiagnosticsMessage(message) ||
+			isEvidenceRejectionMessage(message)
+		) {
+			continue;
+		}
+
+		// Rebuild per-turn context for the retried prompt, including image-only turns.
+		const text = stripTurnContext(message.content);
+		if (text.trim() || message.images?.length) {
+			return {index, text, images: message.images};
 		}
 	}
 
@@ -46,8 +75,8 @@ export const retryCommand: StatefulCommand = {
 	description:
 		'Re-run the last user turn (use --model <id> to switch models first)',
 	run: async context => {
-		const lastUserMessage = findLastUserMessage(context.messages);
-		if (!lastUserMessage) {
+		const target = findRetryTarget(context.messages);
+		if (!target) {
 			context.addToChatQueue(
 				errorMsg('No user message to retry yet.', 'retry-error'),
 			);
@@ -78,13 +107,10 @@ export const retryCommand: StatefulCommand = {
 			}
 		}
 
-		// The stored message carries last turn's context block (#1574). Re-submit
-		// only what the user typed: handleChatMessage builds a fresh block for
-		// this turn, so passing the stored text would wrap one block inside
-		// another and — worse — match skills and recall memories against a query
-		// containing the previous turn's own recalled context.
-		const retryText = stripTurnContext(lastUserMessage.content);
-		await context.submitChatMessage(retryText, retryText);
+		await context.submitChatMessage(target.text, target.text, {
+			images: target.images,
+			replaceFrom: target.index,
+		});
 		// The retried chat turn owns its completion signal. Signalling another
 		// one here can start the next queued prompt while that turn unwinds.
 		return 'handed-off';
