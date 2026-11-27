@@ -166,8 +166,9 @@ test('convertToModelMessages converts assistant message with tool calls', t => {
 	];
 
 	const result = convertToModelMessages(messages);
-	t.is(result.length, 1);
+	t.is(result.length, 2);
 	t.is(result[0].role, 'assistant');
+	t.is(result[1].role, 'tool');
 	t.true(Array.isArray(result[0].content));
 	const content = result[0].content as Array<{
 		type: string;
@@ -200,8 +201,9 @@ test('convertToModelMessages converts assistant message with both text and tool 
 	];
 
 	const result = convertToModelMessages(messages);
-	t.is(result.length, 1);
+	t.is(result.length, 2);
 	t.is(result[0].role, 'assistant');
+	t.is(result[1].role, 'tool');
 	t.true(Array.isArray(result[0].content));
 	const content = result[0].content as Array<{type: string}>;
 	t.is(content.length, 2);
@@ -543,6 +545,59 @@ test('pairUnansweredToolCalls leaves already-paired calls alone', t => {
 
 	const result = pairUnansweredToolCalls(messages);
 	t.deepEqual(result, messages);
+});
+
+test('convertToModelMessages pairs unanswered tool calls before orphan drop', t => {
+	const messages: Message[] = [
+		{role: 'user', content: 'write a file'},
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [
+				{id: 'call_1', function: {name: 'write_file', arguments: {}}},
+			],
+		},
+		{role: 'user', content: 'continue'},
+	];
+
+	const result = convertToModelMessages(messages);
+	t.is(result.length, 4);
+	t.is(result[2].role, 'tool');
+	const toolContent = result[2].content as Array<{
+		type: string;
+		toolCallId?: string;
+		toolName?: string;
+	}>;
+	t.is(toolContent[0]?.toolCallId, 'call_1');
+	t.is(toolContent[0]?.toolName, 'write_file');
+	t.is(result[3].role, 'user');
+});
+
+test('pairUnansweredToolCalls inserts cancellations when a non-tool message interrupts', t => {
+	const messages: Message[] = [
+		{
+			role: 'assistant',
+			content: '',
+			tool_calls: [{id: 'call_1', function: {name: 'edit', arguments: {}}}],
+		},
+		{role: 'assistant', content: 'thinking aloud'},
+		{role: 'tool', content: 'edited', tool_call_id: 'call_1', name: 'edit'},
+		{role: 'user', content: 'ok'},
+	];
+
+	const paired = pairUnansweredToolCalls(messages);
+	t.is(paired[1].role, 'tool');
+	t.is(paired[1].tool_call_id, 'call_1');
+	t.regex(String(paired[1].content), /cancelled/i);
+
+	const converted = convertToModelMessages(paired);
+	const toolResults = converted.filter(m => m.role === 'tool');
+	t.is(toolResults.length, 1);
+	const toolContent = toolResults[0].content as Array<{
+		type: string;
+		toolCallId?: string;
+	}>;
+	t.is(toolContent[0]?.toolCallId, 'call_1');
 });
 
 test('convertToModelMessages drops display-only assistant notices', t => {

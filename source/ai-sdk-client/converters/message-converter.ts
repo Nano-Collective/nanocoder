@@ -47,19 +47,19 @@ export function isEmptyAssistantMessage(message: TestableMessage): boolean {
  * Exported for testing.
  */
 export function dropOrphanedToolResults(messages: Message[]): Message[] {
-	const seenToolCallIds = new Set<string>();
+	const openToolCallIds = new Set<string>();
 	const result: Message[] = [];
 	for (const msg of messages) {
 		if (msg.role === 'tool') {
-			if (msg.tool_call_id && seenToolCallIds.has(msg.tool_call_id)) {
+			if (msg.tool_call_id && openToolCallIds.has(msg.tool_call_id)) {
 				result.push(msg);
+				openToolCallIds.delete(msg.tool_call_id);
 			}
-			// else: orphaned tool result with no matching prior tool_call — drop.
 			continue;
 		}
 		if (msg.role === 'assistant' && msg.tool_calls) {
 			for (const toolCall of msg.tool_calls) {
-				if (toolCall.id) seenToolCallIds.add(toolCall.id);
+				if (toolCall.id) openToolCallIds.add(toolCall.id);
 			}
 		}
 		result.push(msg);
@@ -255,7 +255,7 @@ export function convertToModelMessages(
 		}
 	}
 	const paired = placeToolImages(
-		dropOrphanedToolResults(modelFacing),
+		dropOrphanedToolResults(pairUnansweredToolCalls(modelFacing)),
 		toolImages,
 	);
 	return paired.map((msg): ModelMessage => {
