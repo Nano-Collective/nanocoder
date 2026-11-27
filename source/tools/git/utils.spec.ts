@@ -21,6 +21,7 @@ import {
 } from '@/services/session-context';
 import {
 	parseGitStatus,
+	parseDiffNumstatZ,
 	execGit,
 	execGitBuffer,
 	execGitReadOnly,
@@ -649,4 +650,45 @@ test.serial('pushBranch with an explicit cwd pushes from that directory, not pro
 		rmSync(remoteDir, {recursive: true, force: true});
 		rmSync(cloneDir, {recursive: true, force: true});
 	}
+});
+
+test('parseGitStatus handles -z NUL-delimited output with spaces, non-ASCII, and renames', t => {
+	const raw = [
+		' M my notes.txt',
+		'M  café.txt',
+		'R  new name.txt',
+		'old name.txt',
+		'?? untracked file.txt',
+		'',
+	].join('\0');
+
+	const result = parseGitStatus(raw);
+	t.is(result.unstaged.length, 1);
+	t.is(result.unstaged[0]?.path, 'my notes.txt');
+	t.is(result.unstaged[0]?.status, 'modified');
+
+	t.is(result.staged.length, 2);
+	t.is(result.staged[0]?.path, 'café.txt');
+	t.is(result.staged[0]?.status, 'modified');
+	t.is(result.staged[1]?.path, 'new name.txt');
+	t.is(result.staged[1]?.oldPath, 'old name.txt');
+	t.is(result.staged[1]?.status, 'renamed');
+
+	t.deepEqual(result.untracked, ['untracked file.txt']);
+	t.deepEqual(result.conflicts, []);
+});
+
+test('parseDiffNumstatZ handles NUL-delimited numstat with spaces, non-ASCII, and renames', t => {
+	const raw =
+		'3\t1\tmy notes.txt\0' +
+		'2\t0\tcafé.txt\0' +
+		'4\t2\t\0old name.txt\0new name.txt\0' +
+		'-\t-\tbinary file.png\0';
+
+	const stats = parseDiffNumstatZ(raw);
+	t.deepEqual(stats.get('my notes.txt'), {additions: 3, deletions: 1});
+	t.deepEqual(stats.get('café.txt'), {additions: 2, deletions: 0});
+	t.deepEqual(stats.get('new name.txt'), {additions: 4, deletions: 2});
+	t.deepEqual(stats.get('binary file.png'), {additions: 0, deletions: 0});
+	t.is(stats.size, 4);
 });

@@ -51,7 +51,7 @@ const executeGitAdd = async (args: GitAddInput): Promise<string> => {
 		await execGit(gitArgs);
 
 		// Get the new status to show what was staged
-		const statusOutput = await execGitReadOnly(['status', '--porcelain']);
+		const statusOutput = await execGitReadOnly(['status', '--porcelain', '-z']);
 		const {staged} = parseGitStatus(statusOutput);
 
 		// Get diff stats for staged files

@@ -60,7 +60,7 @@ async function getStatus(): Promise<GitStatusResult> {
 	const {ahead, behind} = await getAheadBehind();
 
 	// Get status
-	const statusOutput = await execGitReadOnly(['status', '--porcelain']);
+	const statusOutput = await execGitReadOnly(['status', '--porcelain', '-z']);
 	const {staged, unstaged, untracked, conflicts} = parseGitStatus(statusOutput);
 
 	// Get diff stats for staged files

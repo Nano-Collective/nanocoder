@@ -889,8 +889,60 @@ function mapStatusChar(char: string): FileChangeStatus {
 	}
 }
 
+function pushStatusEntries(
+	indexStatus: string,
+	workTreeStatus: string,
+	path: string,
+	oldPath: string | undefined,
+	staged: FileChange[],
+	unstaged: FileChange[],
+	untracked: string[],
+	conflicts: string[],
+): void {
+	// Detect conflicts
+	if (
+		indexStatus === 'U' ||
+		workTreeStatus === 'U' ||
+		(indexStatus === 'A' && workTreeStatus === 'A') ||
+		(indexStatus === 'D' && workTreeStatus === 'D')
+	) {
+		conflicts.push(path);
+		return;
+	}
+
+	// Untracked files
+	if (indexStatus === '?' && workTreeStatus === '?') {
+		untracked.push(path);
+		return;
+	}
+
+	// Staged changes
+	if (indexStatus !== ' ' && indexStatus !== '?') {
+		staged.push({
+			path,
+			...(oldPath !== undefined ? {oldPath} : {}),
+			status: mapStatusChar(indexStatus),
+			additions: 0,
+			deletions: 0,
+			isBinary: false,
+		});
+	}
+
+	// Unstaged changes
+	if (workTreeStatus !== ' ' && workTreeStatus !== '?') {
+		unstaged.push({
+			path,
+			...(oldPath !== undefined ? {oldPath} : {}),
+			status: mapStatusChar(workTreeStatus),
+			additions: 0,
+			deletions: 0,
+			isBinary: false,
+		});
+	}
+}
+
 /**
- * Parse git status --porcelain output
+ * Parse `git status --porcelain` (or `--porcelain -z`) output
  */
 export function parseGitStatus(statusOutput: string): {
 	staged: FileChange[];
@@ -903,6 +955,36 @@ export function parseGitStatus(statusOutput: string): {
 	const untracked: string[] = [];
 	const conflicts: string[] = [];
 
+	if (statusOutput.includes('\0')) {
+		const entries = statusOutput.split('\0');
+		for (let i = 0; i < entries.length; i++) {
+			const entry = entries[i];
+			if (!entry || entry.length < 3) continue;
+
+			const indexStatus = entry[0];
+			const workTreeStatus = entry[1];
+			const path = entry.slice(3);
+			const isRenameOrCopy =
+				indexStatus === 'R' ||
+				indexStatus === 'C' ||
+				workTreeStatus === 'R' ||
+				workTreeStatus === 'C';
+			const oldPath = isRenameOrCopy ? entries[++i] : undefined;
+
+			pushStatusEntries(
+				indexStatus,
+				workTreeStatus,
+				path,
+				oldPath,
+				staged,
+				unstaged,
+				untracked,
+				conflicts,
+			);
+		}
+		return {staged, unstaged, untracked, conflicts};
+	}
+
 	const lines = statusOutput.split('\n').filter(line => line);
 
 	for (const line of lines) {
@@ -912,47 +994,53 @@ export function parseGitStatus(statusOutput: string): {
 		const workTreeStatus = line[1];
 		const path = line.slice(3);
 
-		// Detect conflicts
-		if (
-			indexStatus === 'U' ||
-			workTreeStatus === 'U' ||
-			(indexStatus === 'A' && workTreeStatus === 'A') ||
-			(indexStatus === 'D' && workTreeStatus === 'D')
-		) {
-			conflicts.push(path);
-			continue;
-		}
-
-		// Untracked files
-		if (indexStatus === '?' && workTreeStatus === '?') {
-			untracked.push(path);
-			continue;
-		}
-
-		// Staged changes
-		if (indexStatus !== ' ' && indexStatus !== '?') {
-			staged.push({
-				path,
-				status: mapStatusChar(indexStatus),
-				additions: 0,
-				deletions: 0,
-				isBinary: false,
-			});
-		}
-
-		// Unstaged changes
-		if (workTreeStatus !== ' ' && workTreeStatus !== '?') {
-			unstaged.push({
-				path,
-				status: mapStatusChar(workTreeStatus),
-				additions: 0,
-				deletions: 0,
-				isBinary: false,
-			});
-		}
+		pushStatusEntries(
+			indexStatus,
+			workTreeStatus,
+			path,
+			undefined,
+			staged,
+			unstaged,
+			untracked,
+			conflicts,
+		);
 	}
 
 	return {staged, unstaged, untracked, conflicts};
+}
+
+/**
+ * Parse `git diff --numstat -z` output
+ */
+export function parseDiffNumstatZ(
+	output: string,
+): Map<string, {additions: number; deletions: number}> {
+	const stats = new Map<string, {additions: number; deletions: number}>();
+	if (!output) return stats;
+
+	const tokens = output.split('\0');
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i];
+		if (!token) continue;
+		const firstTab = token.indexOf('\t');
+		const secondTab = firstTab >= 0 ? token.indexOf('\t', firstTab + 1) : -1;
+		if (firstTab < 0 || secondTab < 0) continue;
+
+		const addRaw = token.slice(0, firstTab);
+		const delRaw = token.slice(firstTab + 1, secondTab);
+		const additions = addRaw === '-' ? 0 : parseInt(addRaw, 10) || 0;
+		const deletions = delRaw === '-' ? 0 : parseInt(delRaw, 10) || 0;
+		let filePath = token.slice(secondTab + 1);
+		if (filePath === '' && i + 2 < tokens.length) {
+			i++;
+			filePath = tokens[++i] ?? '';
+		}
+		if (filePath) {
+			stats.set(filePath, {additions, deletions});
+		}
+	}
+
+	return stats;
 }
 
 /**
@@ -961,29 +1049,18 @@ export function parseGitStatus(statusOutput: string): {
 export async function getDiffStats(
 	staged: boolean = false,
 ): Promise<Map<string, {additions: number; deletions: number}>> {
-	const stats = new Map<string, {additions: number; deletions: number}>();
-
 	try {
-		const args = ['diff', '--numstat'];
+		const args = ['diff', '--numstat', '-z'];
 		if (staged) args.push('--cached');
 
 		const output = await execGitReadOnly(args);
-		if (!output.trim()) return stats;
+		if (!output.trim()) return new Map();
 
-		for (const line of output.split('\n')) {
-			const parts = line.split('\t');
-			if (parts.length >= 3) {
-				const additions = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
-				const deletions = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
-				const path = parts[2];
-				stats.set(path, {additions, deletions});
-			}
-		}
+		return parseDiffNumstatZ(output);
 	} catch (error) {
 		logger.debug('Failed to get diff stats', {error});
+		return new Map();
 	}
-
-	return stats;
 }
 
 // ============================================================================
