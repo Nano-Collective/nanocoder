@@ -892,3 +892,28 @@ test('Status shows the resolved fallback instruction filename', t => {
 		rmSync(dir, {recursive: true, force: true});
 	}
 });
+
+test('Status does not claim an instruction file is loaded when includeAgentsMd is false', t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-status-instructions-off-'));
+	const originalColumns = process.stdout.columns;
+	try {
+		writeFileSync(join(dir, 'CLAUDE.md'), 'CLAUDE PROJECT RULES');
+		writeFileSync(
+			join(dir, 'agents.config.json'),
+			JSON.stringify({nanocoder: {tune: {includeAgentsMd: false}}}),
+		);
+		process.stdout.columns = 80;
+
+		const output = runInSessionContext(createSessionContext(dir), () => {
+			const {lastFrame} = renderWithTheme(<Status {...defaultProps} />);
+			return lastFrame();
+		});
+
+		t.truthy(output);
+		t.regex(output!, /No AGENTS\.md file found/);
+		t.notRegex(output!, /Using CLAUDE\.md/);
+	} finally {
+		process.stdout.columns = originalColumns;
+		rmSync(dir, {recursive: true, force: true});
+	}
+});

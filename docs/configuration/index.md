@@ -242,7 +242,7 @@ Each profile can specify:
 - `provider` (string): AI provider name (from configured providers)
 - `model` (string): Model ID for the provider
 - `mode` (string): Starting development mode (`normal`, `auto-accept`, `yolo`, `plan`, `architect`)
-- Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `instructionFiles`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc.
+- Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc. (`instructionFiles` is user-level only.)
 - Profile-specific `providers` array, merged into the available providers when the profile is active
 
 #### Profile Selection Precedence
@@ -724,9 +724,9 @@ Nanocoder appends a project instruction file to the system prompt as `Additional
 4. `.github/copilot-instructions.md`
 5. `.cursorrules`
 
-This lets a repo that already maintains guidance for another tool work with Nanocoder without creating a duplicate `AGENTS.md`. Files must be directly inside the project root; absolute paths and `..` segments are ignored.
+This lets a repo that already maintains guidance for another tool work with Nanocoder without creating a duplicate `AGENTS.md`. Candidates must be regular files inside the project root; `.git` paths, gitignored files, symlinks that escape the project, and files larger than the tool-output cap are skipped.
 
-Change the fallback list (or its order) with `nanocoder.instructionFiles`:
+Change the fallback list (or its order) with `nanocoder.instructionFiles` in your **user-level** config:
 
 ```json
 {
@@ -736,7 +736,7 @@ Change the fallback list (or its order) with `nanocoder.instructionFiles`:
 }
 ```
 
-`AGENTS.md` is always checked first. An explicit empty list (`"instructionFiles": []`) disables all fallbacks. The value shown by `/status` and `/doctor` is the file that was actually selected.
+`AGENTS.md` is always checked first. An explicit empty list (`"instructionFiles": []`) disables all fallbacks. Project-level `agents.config.json` files cannot set this option: a cloned repository must not decide which of its files are read into the system prompt. The value shown by `/status` and `/doctor` is the file that was actually selected.
 
 The existing `tune.includeAgentsMd` switch (and the `nano` profile) still controls whether any project instruction file is sent to the model, regardless of which filename was found.
 

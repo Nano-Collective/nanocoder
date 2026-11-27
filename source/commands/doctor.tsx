@@ -3,7 +3,7 @@ import {Box, Text} from 'ink';
 import React from 'react';
 import {loadProviderConfigs} from '@/client-factory';
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {findProjectInstructionFile} from '@/config/instruction-files';
+import {findProjectInstructionFile} from '@/conversation/instruction-files';
 import {
 	type DaemonLock,
 	readLiveLockfile,
@@ -15,6 +15,7 @@ import {getLSPManager} from '@/lsp/lsp-manager';
 import {getToolManager} from '@/message-handler';
 import {getConfiguredFormatters} from '@/services/formatters';
 import {getConfiguredHooks} from '@/services/lifecycle-hooks';
+import {getProjectRoot} from '@/services/session-cwd';
 import type {ToolManager} from '@/tools/tool-manager';
 import {HOOK_EVENTS, type HookEvent} from '@/types/config';
 import type {AIProviderConfig, Command} from '@/types/index';
@@ -279,7 +280,7 @@ export async function collectDoctorReport(
 		daemonLock,
 	] = await Promise.all([
 		settle(() => dependencies.getVersion().then(version => ({version}))),
-		settle(() => findProjectInstructionFile()),
+		settle(() => findProjectInstructionFile(getProjectRoot())),
 		settle(() => collectProviders(dependencies)),
 		settle(() => dependencies.getLspStatus()),
 		settle(() => collectMcp(dependencies.getToolManager())),

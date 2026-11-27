@@ -524,15 +524,16 @@ function loadAlwaysAllowConfig(cwd: string): string[] | undefined {
 }
 
 /**
- * Fallback project instruction filenames. Keep them relative to the project
- * root — an absolute path or a `..` segment would turn this into an arbitrary
- * file read rather than a project instruction lookup.
+ * Fallback project instruction filenames. This option is deliberately read
+ * only from the user-level config: a cloned `agents.config.json` (or project
+ * profile) is untrusted until the folder is approved, and it must not be able
+ * to name an arbitrary project file for inclusion in the system prompt. Keep
+ * entries relative to the project root as defence in depth.
  */
-function loadInstructionFilesConfig(cwd: string): string[] | undefined {
+function loadInstructionFilesConfig(): string[] | undefined {
 	return (
-		loadHierarchicalConfig(
-			cwd,
-			'agents.config.json',
+		tryLoadConfig(
+			join(getConfigPath(), 'agents.config.json'), // nosemgrep
 			'instructionFiles',
 			config => {
 				const value = config.nanocoder?.instructionFiles;
@@ -1037,8 +1038,8 @@ function loadAppConfig(cwd: string): AppConfig {
 	// Load top-level disabledTools (filtered out of every tool-availability path)
 	const disabledTools = loadDisabledToolsConfig(cwd);
 
-	// Load fallback project instruction filenames
-	const instructionFiles = loadInstructionFilesConfig(cwd);
+	// Load fallback project instruction filenames from the user-level config.
+	const instructionFiles = loadInstructionFilesConfig();
 
 	// Load custom system prompt override
 	const systemPrompt = loadSystemPromptConfig(cwd);

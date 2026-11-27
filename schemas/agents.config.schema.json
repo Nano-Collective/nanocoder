@@ -89,7 +89,7 @@
 					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
 				},
 				"instructionFiles": {
-					"description": "Project instruction filenames tried after AGENTS.md, in priority order.",
+					"description": "Project instruction filenames tried after AGENTS.md, in priority order.\nRead only from the user-level config so a cloned project cannot redirect\nwhich of its files are included in the system prompt.",
 					"items": {
 						"type": "string"
 					},
@@ -259,7 +259,7 @@
 					"description": "Shell commands run at fixed points in the agent loop, keyed by lifecycle\nevent. A project-local file can set these, so they carry the same\ncode-execution weight as project MCP servers (`.mcp.json`) and are\ngated behind directory trust."
 				},
 				"instructionFiles": {
-					"description": "Project instruction filenames tried after AGENTS.md, in priority order.",
+					"description": "Project instruction filenames tried after AGENTS.md, in priority order.\nRead only from the user-level config so a cloned project cannot redirect\nwhich of its files are included in the system prompt.",
 					"items": {
 						"type": "string"
 					},

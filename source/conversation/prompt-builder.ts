@@ -16,7 +16,10 @@ import {getLogger} from '@/utils/logging';
 import {notifyWarning} from '@/utils/message-queue-core';
 import {expandAgentsMdImports} from './agents-md-imports.js';
 import {getGitContextSection} from './git-context';
-import {loadProjectInstructionFile} from './instruction-files.js';
+import {
+	loadProjectInstructionFile,
+	shouldIncludeProjectInstructions,
+} from './instruction-files.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -394,8 +397,7 @@ ${getSubagentDescriptions()}`;
 	// Compose and (optionally) append the project instruction file.
 	// Nano omits it by default; users can override via tune.includeAgentsMd.
 	let prompt = sections.filter(Boolean).join('\n\n');
-	const includeAgentsMd = tune.includeAgentsMd ?? (nano ? false : true);
-	if (includeAgentsMd) {
+	if (shouldIncludeProjectInstructions(tune, model)) {
 		prompt = appendProjectInstructions(prompt);
 	}
 

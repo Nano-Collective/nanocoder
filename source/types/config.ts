@@ -400,7 +400,11 @@ export interface DiskNanocoderConfig {
 	disabledTools?: string[];
 	/** Custom system prompt — replaces or extends the built-in prompt. */
 	systemPrompt?: SystemPromptConfig;
-	/** Project instruction filenames tried after AGENTS.md, in priority order. */
+	/**
+	 * Project instruction filenames tried after AGENTS.md, in priority order.
+	 * Read only from the user-level config so a cloned project cannot redirect
+	 * which of its files are included in the system prompt.
+	 */
 	instructionFiles?: string[];
 	/**
 	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
@@ -521,7 +525,8 @@ export interface AppConfig {
 	// Custom system prompt — replaces or extends the built-in prompt
 	systemPrompt?: SystemPromptConfig;
 
-	// Project instruction filenames tried after AGENTS.md, in priority order
+	// Project instruction filenames tried after AGENTS.md, in priority order.
+	// User-level config only; profiles cannot redirect prompt instructions.
 	instructionFiles?: string[];
 
 	// Lifecycle hooks — shell commands run at fixed points in the agent loop.
