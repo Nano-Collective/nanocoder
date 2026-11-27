@@ -104,3 +104,130 @@ test('redacts extra literal values, longest first with env values', t => {
 test('ignores extra literal values shorter than 8 characters', t => {
 	t.is(redactSecrets('the abc test', EMPTY_ENV, ['abc', '']), 'the abc test');
 });
+
+test('redacts Bearer, npm, Hugging Face, Twilio and SendGrid tokens', t => {
+	const cases: Array<[string, string]> = [
+		[
+			'Authorization: Bearer abcdef0123456789abcdef0123456789',
+			'Authorization: Bearer [REDACTED]',
+		],
+		[
+			'token npm_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8',
+			'token [REDACTED]',
+		],
+		[
+			'token hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',
+			'token [REDACTED]',
+		],
+		['key SK0123456789abcdef0123456789abcdef', 'key [REDACTED]'],
+		[
+			'SG.abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+			'[REDACTED]',
+		],
+	];
+	for (const [input, expected] of cases) {
+		t.is(redactSecrets(input, EMPTY_ENV), expected, input);
+	}
+});
+
+test('redacts AWS and Azure keys while keeping the field name', t => {
+	t.is(
+		redactSecrets(
+			'aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+			EMPTY_ENV,
+		),
+		'aws_secret_access_key = [REDACTED]',
+	);
+	t.is(
+		redactSecrets(
+			'AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==',
+			EMPTY_ENV,
+		),
+		'AccountKey=[REDACTED]',
+	);
+});
+
+test('redacts only the password component of a URL', t => {
+	const cases: Array<[string, string]> = [
+		[
+			'DATABASE_URL=postgres://admin:S3cretPassw0rd@db.internal:5432/app',
+			'DATABASE_URL=postgres://admin:[REDACTED]@db.internal:5432/app',
+		],
+		[
+			'git clone https://deploy:ghx-S3cretToken99@example.com/org/repo.git',
+			'git clone https://deploy:[REDACTED]@example.com/org/repo.git',
+		],
+		// Password may itself contain @ or /; mask up to the last @ before the host.
+		['postgres://admin:p@ss@db/x', 'postgres://admin:[REDACTED]@db/x'],
+		['postgres://admin:ab/cd123@db', 'postgres://admin:[REDACTED]@db'],
+		[
+			'https://u:p@ss/wd@host:8443/path?q=1#frag',
+			'https://u:[REDACTED]@host:8443/path?q=1#frag',
+		],
+	];
+	for (const [input, expected] of cases) {
+		t.is(redactSecrets(input, EMPTY_ENV), expected, input);
+	}
+});
+
+test('redacts PASS and CREDENTIAL env values', t => {
+	const env = {DB_PASS: 'hunter2hunter2'};
+	t.is(
+		redactSecrets(
+			'env DB_PASS=hunter2hunter2, then the text "connecting with hunter2hunter2"',
+			env,
+		),
+		'env DB_PASS=[REDACTED], then the text "connecting with [REDACTED]"',
+	);
+	const credEnv = {API_CREDENTIAL: 'abcdefgh1234'};
+	t.is(
+		redactSecrets('API_CREDENTIAL=abcdefgh1234', credEnv),
+		'API_CREDENTIAL=[REDACTED]',
+	);
+});
+
+test('PWD does not mask file paths, and AUTH does not mask non-secret values', t => {
+	// Every shell sets PWD to the current directory; redactSecrets defaults to
+	// process.env, so PWD must stay out of SECRET_ENV_NAME or all paths break.
+	const pwdEnv = {PWD: '/home/runner/work/nanocoder/nanocoder'};
+	t.is(
+		redactSecrets(
+			'see /home/runner/work/nanocoder/nanocoder/source/x.ts in the report',
+			pwdEnv,
+		),
+		'see /home/runner/work/nanocoder/nanocoder/source/x.ts in the report',
+	);
+	// AUTH_URL and AUTH_TYPE are configuration, not credentials.
+	const authEnv = {AUTH_URL: 'https://example.com', AUTH_TYPE: 'basic'};
+	t.is(
+		redactSecrets('AUTH_URL=https://example.com and AUTH_TYPE=basic', authEnv),
+		'AUTH_URL=https://example.com and AUTH_TYPE=basic',
+	);
+});
+
+test('new patterns leave ordinary text, identifiers and URLs alone', t => {
+	const text = [
+		'AUTHOR=Jane Doe, PASSAGE=well-known text, CREDENTIALS_REPORT=draft',
+		'const bearerToken = config.read(); // no credential here',
+		'https://example.com/org/repo without any credentials',
+		'postgres://admin@db.internal:5432/app',
+		'npm install did not fail; hf_models are loaded lazily',
+		'Bearer authentication scheme is described here',
+		'Bearer abcdefghijklmnop is prose here',
+		'Warning: Bearer',
+		'ordinary text continues here for a while',
+	].join('\n');
+	t.is(redactSecrets(text, EMPTY_ENV), text);
+});
+
+test('new env-name additions do not mask lookalike names', t => {
+	const env = {
+		AUTHOR: 'Jane Doe, writer of many books',
+		PASSAGE: 'the quick brown fox jumps over the lazy dog',
+		AUTHORS_NOTE: 'an ordinary note about the project',
+	};
+	const text = Object.entries(env)
+		.map(([name, value]) => `${name}=${value}`)
+		.join(' | ');
+	t.is(redactSecrets(text, env), text);
+});

@@ -32,9 +32,38 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 	// JWTs: base64url header and payload that both decode to a JSON object
 	// (`{"` encodes as `eyJ`), plus a signature.
 	/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+	// HTTP Authorization header. Keep the scheme so the log stays readable.
+	// Use horizontal whitespace only so a line break cannot make a bare
+	// "Bearer" at EOL mask the start of the next line. Require a non-letter in
+	// the token so prose like "Bearer authentication scheme" is left alone;
+	// drop the i flag for the same reason.
+	/(?<=Bearer[ \t])(?=[A-Za-z0-9._~+\/=-]{0,15}[0-9._~+\/=-])[A-Za-z0-9._~+\/=-]{16,}/g,
+	// npm and Hugging Face access tokens.
+	/\bnpm_[A-Za-z0-9]{20,}\b/g,
+	/\bhf_[A-Za-z0-9]{20,}\b/g,
+	// AWS secret access key: 40 base64-ish characters after the field name.
+	/(?<=aws_secret_access_key\s*[:=]\s*)[A-Za-z0-9\/+=]{40}(?![A-Za-z0-9\/+=])/gi,
+	// Azure Storage account key: long base64 value after the field name.
+	/(?<=AccountKey\s*[:=]\s*)[A-Za-z0-9\/+=]{40,}/gi,
+	// Password component of a URL credentials block (scheme://user:pass@host).
+	// Keeps the scheme, user and host; masks only the password. The password may
+	// itself contain @ or /, so consume greedily up to the last @ that is
+	// followed by a host and end-of-authority (port, path, query, fragment or
+	// whitespace). Non-whitespace only, so one log line cannot mask the next.
+	/(?<=:\/\/[^:@\s\/]+:)[^\s]*(?=@[^\s@\/]+(?::\d+)?(?:[\/?#]|\s|$))/g,
+	// Twilio API key (SK + 32 hex) and SendGrid API key (SG.<id>.<secret>).
+	/\bSK[0-9a-f]{32}\b/g,
+	/\bSG\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
 ];
 
-const SECRET_ENV_NAME = /TOKEN|KEY|SECRET|PASSWORD/i;
+// The original short list is a substring match; the additions are anchored to
+// word boundaries so ordinary names such as PASSAGE are not treated as secrets.
+// TOKEN/KEY/SECRET/PASSWORD keep their historical substring behaviour.
+// PWD and AUTH are deliberately absent: PWD is the current directory in every
+// shell (masking it breaks file paths in reports), and AUTH matches values like
+// AUTH_URL that are not secrets.
+const SECRET_ENV_NAME =
+	/TOKEN|KEY|SECRET|PASSWORD|(?:^|_)(?:PASS|CREDENTIAL)(?:_|$)/i;
 const MIN_ENV_SECRET_LENGTH = 8;
 
 /**
