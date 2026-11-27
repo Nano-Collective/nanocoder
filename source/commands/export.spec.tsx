@@ -200,6 +200,57 @@ test('exportCommand treats --json as JSON even with a non-JSON filename', async 
 	t.false(content.includes('# Nanocoder Chat Export'));
 });
 
+test('exportCommand accepts --json after the filename', async t => {
+	fs.writeFile = originalWriteFile;
+	const filename = `flag-after-export-${process.pid}`;
+	const filepath = path.join(process.cwd(), filename);
+	t.teardown(() => fs.rm(filepath, {force: true}));
+
+	await exportCommand.handler([filename, '--json'], testMessages, testMetadata);
+
+	const content = await fs.readFile(filepath, 'utf8');
+	t.deepEqual(JSON.parse(content).messages, JSON.parse(JSON.stringify(testMessages)));
+	t.false(content.includes('# Nanocoder Chat Export'));
+});
+
+async function renderExportError(t: {false: (v: boolean) => void}, args: string[]) {
+	const result = (await exportCommand.handler(
+		args,
+		testMessages,
+		testMetadata,
+	)) as React.ReactElement;
+	const {lastFrame} = render(<MockThemeProvider>{result}</MockThemeProvider>);
+	const output = lastFrame() ?? '';
+	t.false(output.includes('Chat exported'));
+	return output;
+}
+
+test('exportCommand rejects a second filename without writing', async t => {
+	const output = await renderExportError(t, ['my', 'chat.md']);
+	t.regex(output, /Too many arguments/);
+	t.regex(output, /Usage:\s+\/export \[--json\] \[filename\]/);
+	t.is(mockWriteFileCalls.length, 0);
+});
+
+test('exportCommand rejects an unknown flag without writing', async t => {
+	const output = await renderExportError(t, ['--josn']);
+	t.regex(output, /Unknown option "--josn"/);
+	t.regex(output, /Usage:\s+\/export/);
+	t.is(mockWriteFileCalls.length, 0);
+});
+
+test('exportCommand rejects an unknown flag after the filename without writing', async t => {
+	const output = await renderExportError(t, ['chat.md', '--jsn']);
+	t.regex(output, /Unknown option "--jsn"/);
+	t.is(mockWriteFileCalls.length, 0);
+});
+
+test('exportCommand rejects --json given twice without writing', async t => {
+	const output = await renderExportError(t, ['--json', 'chat.json', '--json']);
+	t.regex(output, /--json given more than once/);
+	t.is(mockWriteFileCalls.length, 0);
+});
+
 test('exportCommand writes a generated filename that is free', async t => {
 	await exportCommand.handler([], testMessages, testMetadata);
 

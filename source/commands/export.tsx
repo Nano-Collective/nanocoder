@@ -63,6 +63,35 @@ function isJsonExport(filename: string): boolean {
 	return filename.toLowerCase().endsWith('.json');
 }
 
+const EXPORT_USAGE = 'Usage: /export [--json] [filename]';
+
+// Read every argument before anything is written: one optional --json, in
+// either position, and at most one filename. Anything else is an error, so a
+// misplaced or misspelled flag never becomes a file name or a wrong format.
+function parseExportArgs(
+	args: string[],
+): {jsonFlag: boolean; filename?: string} | {error: string} {
+	let jsonFlag = false;
+	let filename: string | undefined;
+	for (const arg of args) {
+		if (arg === '--json') {
+			if (jsonFlag) {
+				return {error: '--json given more than once.'};
+			}
+			jsonFlag = true;
+		} else if (arg.startsWith('-')) {
+			return {error: `Unknown option "${arg}".`};
+		} else if (filename === undefined) {
+			filename = arg;
+		} else {
+			return {
+				error: `Too many arguments: expected one filename, got "${filename}" and "${arg}".`,
+			};
+		}
+	}
+	return {jsonFlag, filename};
+}
+
 function Export({filename}: {filename: string}) {
 	return (
 		<SuccessMessage
@@ -93,14 +122,21 @@ export const exportCommand: Command = {
 		messages: Message[],
 		{provider, model, tokens},
 	) => {
-		const jsonFlag = args[0] === '--json';
-		const userProvided = jsonFlag ? Boolean(args[1]) : Boolean(args[0]);
-		const jsonRequested = jsonFlag || isJsonExport(args[0] || '');
-		const requestedFilename = jsonRequested
-			? jsonFlag
-				? args[1] || generateJsonExportFilename(messages)
-				: args[0]
-			: args[0] || generateExportFilename(messages);
+		const parsed = parseExportArgs(args);
+		if ('error' in parsed) {
+			return React.createElement(ExportError, {
+				key: generateKey('export'),
+				message: `${parsed.error} ${EXPORT_USAGE}`,
+			});
+		}
+		const {jsonFlag, filename} = parsed;
+		const userProvided = Boolean(filename);
+		const jsonRequested = jsonFlag || isJsonExport(filename || '');
+		const requestedFilename =
+			filename ||
+			(jsonRequested
+				? generateJsonExportFilename(messages)
+				: generateExportFilename(messages));
 
 		// Resolve against the session cwd (which honours bash `cd`) and enforce
 		// containment within the project root (which does not shrink as `cd`
