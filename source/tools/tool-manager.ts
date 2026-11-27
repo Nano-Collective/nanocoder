@@ -865,6 +865,42 @@ export class ToolManager {
 		return this.mcpClient;
 	}
 
+	/** HTTP servers that need `/mcp login <name>` before they can connect. */
+	getAuthRequiredMCPServers(): string[] {
+		return this.mcpClient?.getAuthRequiredServers() || [];
+	}
+
+	/**
+	 * Run the browser OAuth login for an HTTP MCP server, connect to it and
+	 * register its tools. `onAuthorizationUrl` receives the URL to show the
+	 * user in case the browser did not open.
+	 */
+	async loginToMCPServer(
+		serverName: string,
+		onAuthorizationUrl?: (url: URL) => void,
+		signal?: AbortSignal,
+	): Promise<void> {
+		if (!this.mcpClient) {
+			throw new Error(
+				'No MCP servers are configured. Add the server to agents.config.json first.',
+			);
+		}
+		await this.mcpClient.loginToServer(serverName, {
+			onAuthorizationUrl,
+			signal,
+		});
+		// A first connection emits no health change, so add the tools here.
+		this.restoreServerTools(serverName);
+	}
+
+	/** Forget stored OAuth tokens for an HTTP MCP server and disconnect it. */
+	async logoutFromMCPServer(serverName: string): Promise<void> {
+		if (!this.mcpClient) {
+			throw new Error('No MCP servers are configured.');
+		}
+		await this.mcpClient.logoutFromServer(serverName);
+	}
+
 	onMCPHealthChange(listener: (change: MCPHealthChange) => void): () => void {
 		return this.mcpClient?.onHealthChange(listener) || (() => {});
 	}

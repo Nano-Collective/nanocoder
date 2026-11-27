@@ -1,3 +1,4 @@
+import type {OAuthClientProvider} from '@modelcontextprotocol/sdk/client/auth.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {WebSocketClientTransport} from '@modelcontextprotocol/sdk/client/websocket.js';
@@ -181,6 +182,15 @@ class HeadersWebSocketClientTransport implements Transport {
 
 export type ClientTransport = Transport;
 
+export interface TransportOptions {
+	/**
+	 * OAuth provider for remote servers that require authentication. Only the
+	 * http transport uses it: the SDK attaches Bearer tokens, refreshes them,
+	 * and starts the authorization flow on a 401 challenge.
+	 */
+	authProvider?: OAuthClientProvider;
+}
+
 /**
  * Factory for creating MCP client transports based on server configuration
  */
@@ -188,7 +198,10 @@ export class TransportFactory {
 	/**
 	 * Creates a transport instance for the given MCP server configuration
 	 */
-	static createTransport(server: MCPServer): ClientTransport {
+	static createTransport(
+		server: MCPServer,
+		options: TransportOptions = {},
+	): ClientTransport {
 		switch (server.transport) {
 			case 'stdio':
 				return this.createStdioTransport(server);
@@ -197,7 +210,7 @@ export class TransportFactory {
 				return this.createWebSocketTransport(server);
 
 			case 'http':
-				return this.createHTTPTransport(server);
+				return this.createHTTPTransport(server, options.authProvider);
 
 			default: {
 				const _exhaustiveCheck: never = server.transport;
@@ -271,6 +284,7 @@ export class TransportFactory {
 	 */
 	private static createHTTPTransport(
 		server: MCPServer,
+		authProvider?: OAuthClientProvider,
 	): StreamableHTTPClientTransport {
 		if (!server.url) {
 			throw new Error(
@@ -287,10 +301,14 @@ export class TransportFactory {
 			);
 		}
 
-		// Create transport with headers if provided
-		const transportOptions = server.headers
-			? {requestInit: {headers: server.headers}}
-			: undefined;
+		// Create transport with headers and/or an OAuth provider if provided
+		const transportOptions =
+			server.headers || authProvider
+				? {
+						...(server.headers ? {requestInit: {headers: server.headers}} : {}),
+						...(authProvider ? {authProvider} : {}),
+					}
+				: undefined;
 
 		return new StreamableHTTPClientTransport(url, transportOptions);
 	}
@@ -402,6 +420,7 @@ export class TransportFactory {
 					'Uses the StreamableHTTP protocol from MCP specification',
 					'Best for stateless remote services and APIs',
 					'Custom headers are supported for authentication',
+					'OAuth-protected servers can be signed in to with /mcp login <server>',
 				];
 
 			default:

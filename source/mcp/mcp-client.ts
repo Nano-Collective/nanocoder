@@ -1,3 +1,4 @@
+import {auth} from '@modelcontextprotocol/sdk/client/auth.js';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
@@ -36,6 +37,11 @@ import {
 	type LifecycleTransport,
 	MCPHealthMonitor,
 } from './health-monitor.js';
+import {
+	isAuthRequiredError,
+	MCPAuthRequiredError,
+	MCPOAuthProvider,
+} from './oauth-provider.js';
 import {
 	buildToolMapping,
 	findToolNameConflicts,
@@ -83,6 +89,19 @@ export class MCPClient {
 	 * down the connection it just made instead of resurrecting the server.
 	 */
 	private lifecycleEpoch = 0;
+	/**
+	 * HTTP servers whose last connection attempt failed because the server
+	 * demands an OAuth login the user has not completed yet. Keyed by server
+	 * name; the value is the normalized config so `/mcp login <name>` can find
+	 * the URL even though the server is not connected.
+	 */
+	private authRequired: Map<string, MCPServer> = new Map();
+	/**
+	 * Every server a connection was attempted for, connected or not, keyed by
+	 * name. Lets `/mcp login <name>` recover a configured server whose first
+	 * connection failed for a reason other than authentication.
+	 */
+	private configuredServers: Map<string, MCPServer> = new Map();
 	private logger = getLogger();
 	/** Health status, pings and reconnect backoff for every server. */
 	private readonly healthMonitor: MCPHealthMonitor;
@@ -229,6 +248,7 @@ export class MCPClient {
 		return await withNewCorrelationContext(async () => {
 			// Normalize server configuration for backward compatibility
 			const normalizedServer = this.normalizeServerConfig(server);
+			this.configuredServers.set(normalizedServer.name, normalizedServer);
 
 			this.logger.info('Connecting to MCP server', {
 				serverName: normalizedServer.name,
@@ -258,8 +278,23 @@ export class MCPClient {
 
 			let client: Client | undefined;
 			try {
+				// Remote HTTP servers get an OAuth provider so stored tokens are
+				// sent and refreshed. It is non-interactive here: a server that
+				// needs a fresh browser login makes the connect fail with an
+				// auth-required error instead of opening a browser at startup.
+				const authProvider =
+					normalizedServer.transport === 'http' && normalizedServer.url
+						? new MCPOAuthProvider({
+								serverName: normalizedServer.name,
+								serverUrl: normalizedServer.url,
+								interactive: false,
+							})
+						: undefined;
+
 				// Create transport using the factory
-				const transport = TransportFactory.createTransport(normalizedServer);
+				const transport = TransportFactory.createTransport(normalizedServer, {
+					authProvider,
+				});
 
 				this.logger.debug('MCP transport created', {
 					serverName: normalizedServer.name,
@@ -401,6 +436,7 @@ export class MCPClient {
 				}
 				this.serverResources.set(normalizedServer.name, resources);
 				this.serverPrompts.set(normalizedServer.name, prompts);
+				this.authRequired.delete(normalizedServer.name);
 				this.healthMonitor.setStatus(normalizedServer.name, 'connected');
 				const healthInterval = normalizedServer.healthCheckInterval ?? 30_000;
 				this.healthMonitor.watch(
@@ -440,6 +476,20 @@ export class MCPClient {
 				}
 
 				const finalMetrics = endMetrics(metrics);
+
+				if (isAuthRequiredError(error)) {
+					// Not a failure of the server or the network: the user has to
+					// sign in. Remember the config so /mcp login can find the URL,
+					// and surface one consistent, actionable message.
+					this.authRequired.set(normalizedServer.name, normalizedServer);
+					this.logger.warn('MCP server requires authentication', {
+						serverName: normalizedServer.name,
+						duration: `${finalMetrics.duration.toFixed(2)}ms`,
+						correlationId,
+					});
+					throw new MCPAuthRequiredError(normalizedServer.name);
+				}
+
 				this.logger.error('Failed to connect to MCP server', {
 					serverName: normalizedServer.name,
 					transport: normalizedServer.transport,
@@ -1163,6 +1213,8 @@ export class MCPClient {
 			this.serverConfigs.clear();
 			this.healthMonitor.reset();
 			this.closing.clear();
+			this.authRequired.clear();
+			this.configuredServers.clear();
 			this.isConnected = false;
 
 			this.logger.info('MCP client disconnection completed', {
@@ -1182,6 +1234,159 @@ export class MCPClient {
 
 	getServerNames(): string[] {
 		return Array.from(this.clients.keys());
+	}
+
+	/**
+	 * Names of configured HTTP servers that could not connect because they
+	 * require an OAuth login (`/mcp login <name>`).
+	 */
+	getAuthRequiredServers(): string[] {
+		return Array.from(this.authRequired.keys());
+	}
+
+	/**
+	 * Resolve a server config by name, whether it is connected, waiting for
+	 * authentication, or configured but failed to connect.
+	 */
+	private findServerConfig(serverName: string): MCPServer | undefined {
+		return (
+			this.serverConfigs.get(serverName) ??
+			this.authRequired.get(serverName) ??
+			this.configuredServers.get(serverName)
+		);
+	}
+
+	/**
+	 * Close one server's connection and tell health listeners first, while the
+	 * tool mapping is still intact, so they can unregister its tools (the same
+	 * order markServerUnhealthy uses). No-op when the server is not connected.
+	 */
+	private async dropServer(serverName: string, reason: string): Promise<void> {
+		if (!this.clients.has(serverName)) {
+			return;
+		}
+		if (this.healthMonitor.getStatus(serverName) === 'connected') {
+			this.healthMonitor.setStatus(serverName, 'unhealthy', reason);
+		}
+		await this.forgetServer(serverName);
+	}
+
+	/**
+	 * Run the interactive OAuth authorization code flow for an HTTP server and
+	 * connect to it once tokens are stored. `onAuthorizationUrl` receives the
+	 * URL the user must open (the browser is opened automatically when
+	 * possible). Resolves once the server is connected and its tools are
+	 * registered in this client.
+	 */
+	async loginToServer(
+		serverName: string,
+		options: {
+			onAuthorizationUrl?: (url: URL) => void;
+			openBrowser?: boolean;
+			signal?: AbortSignal;
+		} = {},
+	): Promise<void> {
+		const config = this.findServerConfig(serverName);
+		if (!config) {
+			throw new Error(
+				`Unknown MCP server "${serverName}". Check the server name in your agents.config.json.`,
+			);
+		}
+		if (config.transport !== 'http' || !config.url) {
+			throw new Error(
+				`MCP server "${serverName}" uses the ${config.transport} transport; OAuth login is only available for http servers.`,
+			);
+		}
+
+		const provider = new MCPOAuthProvider({
+			serverName,
+			serverUrl: config.url,
+			interactive: true,
+			onAuthorizationUrl: options.onAuthorizationUrl,
+			openBrowser: options.openBrowser,
+			forceAuthorization: true,
+		});
+
+		options.signal?.throwIfAborted();
+
+		const fetchFn: typeof fetch = (input, init) =>
+			fetch(input, {
+				...init,
+				signal: options.signal
+					? AbortSignal.any([
+							options.signal,
+							...(init?.signal ? [init.signal] : []),
+						])
+					: init?.signal,
+			});
+		await provider.startCallbackListener();
+		try {
+			const result = await auth(provider, {serverUrl: config.url, fetchFn});
+			if (result === 'REDIRECT') {
+				const authorizationCode = await provider.waitForAuthorizationCode(
+					options.signal,
+				);
+				const exchanged = await auth(provider, {
+					serverUrl: config.url,
+					fetchFn,
+					authorizationCode,
+				});
+				if (exchanged !== 'AUTHORIZED') {
+					throw new Error(
+						`Authorization server did not issue tokens for MCP server "${serverName}".`,
+					);
+				}
+			}
+		} finally {
+			provider.stopCallbackListener();
+		}
+
+		this.logger.info('MCP OAuth login completed', {serverName});
+
+		// (Re)connect with the freshly stored tokens. An existing connection is
+		// replaced.
+		await this.dropServer(serverName, 'Re-authenticating');
+		await this.connectToServer(config);
+	}
+
+	/**
+	 * Forget stored OAuth tokens for an HTTP server and disconnect from it.
+	 * The server is reported as requiring authentication afterwards.
+	 */
+	async logoutFromServer(serverName: string): Promise<void> {
+		const config = this.findServerConfig(serverName);
+		if (!config) {
+			throw new Error(`Unknown MCP server "${serverName}".`);
+		}
+		if (config.transport !== 'http' || !config.url) {
+			throw new Error(
+				`MCP server "${serverName}" uses the ${config.transport} transport; OAuth logout is only available for http servers.`,
+			);
+		}
+
+		const provider = new MCPOAuthProvider({
+			serverName,
+			serverUrl: config.url,
+		});
+		const hadCredentials =
+			provider.tokens() !== undefined ||
+			provider.clientInformation() !== undefined;
+		if (!hadCredentials) {
+			// Nothing to sign out of (e.g. a server authenticated with static
+			// `headers`). Leave its connection alone: OAuth login could not
+			// bring it back.
+			throw new Error(
+				`MCP server "${serverName}" has no stored OAuth credentials; nothing to sign out of.`,
+			);
+		}
+		provider.invalidateCredentials('all');
+
+		await this.dropServer(serverName, 'Signed out');
+		this.authRequired.set(serverName, config);
+		this.logger.info('MCP OAuth logout completed', {
+			serverName,
+			hadCredentials,
+		});
 	}
 
 	isServerConnected(serverName: string): boolean {
