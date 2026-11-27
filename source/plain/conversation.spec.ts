@@ -160,6 +160,36 @@ test("tune's XML tool mode asks the client not to send native tools", async (t) 
 	t.is(seen[0]?.nativeToolsDisabled, true);
 });
 
+test("passes tune's model parameters to the client only when tune is enabled", async (t) => {
+	const seen: Array<ModeOverrides | undefined> = [];
+	const client: LLMClient = {
+		...makeFakeClient({ responses: [] }),
+		chat: async (_messages, _tools, _callbacks, _signal, modeOverrides) => {
+			seen.push(modeOverrides);
+			return {
+				choices: [{ message: { role: "assistant", content: "done" } }],
+			};
+		},
+	};
+	const modelParameters = { temperature: 0.2, maxTokens: 512 };
+
+	for (const enabled of [true, false]) {
+		await runPlainConversation({
+			client,
+			toolManager: makeFakeToolManager(),
+			systemMessage: SYSTEM,
+			initialMessages: [USER],
+			developmentMode: "auto-accept",
+			nonInteractiveAlwaysAllow: [],
+			abortSignal: new AbortController().signal,
+			tune: { ...TUNE_DEFAULTS, enabled, modelParameters },
+		});
+	}
+
+	t.deepEqual(seen[0]?.modelParameters, modelParameters);
+	t.is(seen[1]?.modelParameters, undefined);
+});
+
 test("nudges through empty responses up to the cap, then returns error", async (t) => {
 	// Default maxEmptyTurns = 2: initial empty + 2 nudged retries = 3 calls.
 	const client = makeFakeClient({
