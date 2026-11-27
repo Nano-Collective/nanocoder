@@ -27,6 +27,7 @@ type CommandHelpOverrides = Omit<CommandHelpDetails, 'category' | 'usage'> & {
 
 const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 	'Session & Workflow': [
+		'btw',
 		'checkpoint',
 		'clear',
 		'compact',
@@ -127,6 +128,10 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 			'/checkpoint list',
 			'/checkpoint load before-refactor',
 		],
+	},
+	btw: {
+		usage: '/btw <question>',
+		examples: ['/btw what does this flag do?'],
 	},
 	clear: {
 		usage: '/clear',

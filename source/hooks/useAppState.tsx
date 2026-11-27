@@ -357,6 +357,8 @@ export function useAppState(
 	// Live component state - renders over top of the static chat queue
 	// Used for loading indicators, live task progress, etc.
 	const [liveComponent, setLiveComponent] = useState<React.ReactNode>(null);
+	// Pinned side panel (e.g. /btw) - survives liveComponent clears during turns.
+	const [btwPanel, setBtwPanel] = useState<React.ReactNode>(null);
 
 	// Prompt Scrubbing Session
 	const privacySessionMapRef = useRef<Record<string, string>>({});
@@ -595,6 +597,8 @@ export function useAppState(
 			setChatComponents,
 			liveComponent,
 			setLiveComponent,
+			btwPanel,
+			setBtwPanel,
 			privacySessionMapRef,
 			setAttachedAgentId,
 
@@ -668,6 +672,7 @@ export function useAppState(
 			setCurrentSessionId,
 			setLiveTaskList,
 			liveComponent,
+			btwPanel,
 			addToChatQueue,
 			getMessageTokens,
 			updateMessages,

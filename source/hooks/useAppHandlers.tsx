@@ -128,6 +128,7 @@ interface UseAppHandlersProps {
 	addToChatQueue: (component: React.ReactNode) => void;
 	setChatComponents: (components: React.ReactNode[]) => void;
 	setLiveComponent: (component: React.ReactNode) => void;
+	setBtwPanel?: (component: React.ReactNode) => void;
 	setLiveComponentCapturesInput: (value: boolean) => void;
 	client: LLMClient | null;
 	getMessageTokens: (message: Message) => number;
@@ -150,6 +151,8 @@ interface UseAppHandlersProps {
 	handleChatMessage: (message: string, displayValue?: string) => Promise<void>;
 	lastApiUsage?: ApiUsageSnapshot | null;
 	apiCallHistory?: ApiCallRecord[];
+	/** Record an out-of-band API call (e.g. /btw) so /usage and stats stay honest. */
+	onApiCallComplete?: (record: ApiCallRecord) => void;
 
 	// VS Code active editor dismissal (dropped on /clear)
 	dismissActiveEditor?: () => void;
@@ -224,6 +227,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		lspServersStatus,
 		mcpServersStatus,
 		messages,
+		onApiCallComplete,
 		onClearCounterIncrement,
 		preferencesLoaded,
 		setActiveMode,
@@ -236,6 +240,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 		setIsConversationComplete,
 		setIsToolExecuting,
 		setLiveComponent,
+		setBtwPanel,
 		setLiveComponentCapturesInput,
 		setLiveTaskList,
 		setPendingPlanProceed,
@@ -1054,6 +1059,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					onSwitchMode: setDevelopmentMode,
 					onAddToChatQueue: addToChatQueue,
 					setLiveComponent: setLiveComponent,
+					setBtwPanel: setBtwPanel,
 					setLiveComponentCapturesInput: setLiveComponentCapturesInput,
 					setIsToolExecuting: setIsToolExecuting,
 					onCommandComplete: () => setIsConversationComplete(true),
@@ -1071,6 +1077,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 					developmentMode: developmentMode,
 					lastApiUsage: lastApiUsage,
 					apiCallHistory: apiCallHistory,
+					onApiCallComplete: onApiCallComplete,
 					sessionId: ensureCurrentSessionId(),
 				},
 				// Injected hook context must not reach the transcript — fall back to
@@ -1093,6 +1100,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			handleChatMessage,
 			addToChatQueue,
 			setLiveComponent,
+			setBtwPanel,
 			setIsToolExecuting,
 			updateMessages,
 			appendMessages,
@@ -1107,6 +1115,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			developmentMode,
 			lastApiUsage,
 			apiCallHistory,
+			onApiCallComplete,
 			ensureCurrentSessionId,
 			clearMessages,
 			enterCheckpointLoadMode,

@@ -93,6 +93,8 @@ export interface CommandContext {
 	addToChatQueue: (component: React.ReactNode) => void;
 	/** The single live slot under the transcript (`null` clears it). */
 	setLiveComponent: (component: React.ReactNode) => void;
+	/** Pinned side panel that survives liveComponent clears during turns (e.g. /btw). */
+	setBtwPanel?: (component: React.ReactNode) => void;
 	/** Give the live component the keyboard instead of the chat composer. */
 	setLiveComponentCapturesInput: (value: boolean) => void;
 	setIsToolExecuting: (value: boolean) => void;
@@ -126,6 +128,8 @@ export interface CommandContext {
 	switchModel?: (provider: string, model: string) => Promise<boolean>;
 	/** Switch development mode (normal, auto-accept, yolo, plan, architect). */
 	switchMode?: (mode: DevelopmentMode) => void;
+	/** Record an out-of-band API call so /usage and stats stay honest. */
+	onApiCallComplete?: (record: ApiCallRecord) => void;
 	/** Send a prompt to the model as a new chat turn. */
 	submitChatMessage: (message: string, displayValue?: string) => Promise<void>;
 }
