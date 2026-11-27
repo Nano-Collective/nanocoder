@@ -26,6 +26,7 @@ import type {
 	ToolEntry,
 	ToolHandler,
 } from "@/types/core";
+import { setRestrictedScope } from "@/utils/restricted-scope";
 import "@/tools/file-ops/write-file";
 import { runPlainConversation } from "./conversation.js";
 
@@ -3064,3 +3065,74 @@ test.serial(
 		}
 	},
 );
+
+test.serial("a scoped run refuses unapproved calls and carries on", async (t) => {
+	setRestrictedScope(["src"]);
+	const written: string[] = [];
+	const originalWrite = process.stderr.write;
+	process.stderr.write = ((chunk: string) => {
+		written.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
+	t.teardown(() => {
+		setRestrictedScope(undefined);
+		process.stderr.write = originalWrite;
+	});
+
+	const call = (id: string, name: string): ToolCall => ({
+		id,
+		function: { name, arguments: {} },
+	});
+	const client = makeFakeClient({
+		responses: [
+			{
+				choices: [
+					{
+						message: {
+							role: "assistant",
+							content: "",
+							tool_calls: [call("1", "risky_tool"), call("2", "safe_tool")],
+						},
+					},
+				],
+			},
+			{ choices: [{ message: { role: "assistant", content: "all done" } }] },
+		],
+	});
+	const ran: string[] = [];
+	setToolRegistryGetter(() => ({
+		risky_tool: (async () => {
+			ran.push("risky_tool");
+			return "no";
+		}) as ToolHandler,
+		safe_tool: (async () => {
+			ran.push("safe_tool");
+			return "yes";
+		}) as ToolHandler,
+	}));
+
+	const outcome = await runPlainConversation({
+		client,
+		toolManager: makeFakeToolManager({
+			knownTools: new Set(["risky_tool", "safe_tool"]),
+			needsApprovalByName: { risky_tool: true },
+		}),
+		systemMessage: SYSTEM,
+		initialMessages: [USER],
+		developmentMode: "auto-accept",
+		nonInteractiveAlwaysAllow: [],
+		abortSignal: new AbortController().signal,
+		telemetry: true,
+	});
+
+	process.stderr.write = originalWrite;
+	t.is(outcome.kind, "success");
+	t.deepEqual(ran, ["safe_tool"]);
+	t.regex(outcome.toolCalls[0]?.error ?? "", /needs approval/);
+	const events = written.filter((line) => line.startsWith('{"type"'));
+	t.deepEqual(events, [
+		'{"type":"turn"}\n',
+		'{"type":"tool","tool":"safe_tool"}\n',
+		'{"type":"turn"}\n',
+	]);
+});

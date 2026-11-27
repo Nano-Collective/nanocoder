@@ -36,6 +36,7 @@ import type {
 	ToolResult,
 } from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
+import {getRestrictedScope} from '@/utils/restricted-scope';
 
 export interface ToolCallLog {
 	name: string;
@@ -57,6 +58,8 @@ export interface RunPlainConversationOptions {
 	outputFormat?: 'text' | 'json';
 	sessionId?: string;
 	workingDirectory?: string;
+	/** Report model turns and tool calls as JSON lines on stderr. */
+	telemetry?: boolean;
 	/**
 	 * Validate the final content-only answer against this JSON Schema. Invalid
 	 * answers are sent back to the model with their errors and retried within
@@ -190,7 +193,15 @@ async function runPlainConversationBody(
 		workingDirectory = process.cwd(),
 		jsonSchema,
 		enforceWalkthrough = false,
+		telemetry = false,
 	} = options;
+
+	const emitTelemetry = (event: Record<string, string>) => {
+		if (telemetry) process.stderr.write(`${JSON.stringify(event)}\n`);
+	};
+	// A run limited to some paths is unattended work inside a larger job, so a
+	// call it cannot approve is refused and the model carries on without it.
+	const refuseUnapproved = getRestrictedScope() !== undefined;
 
 	const isJson = outputFormat === 'json';
 	// With a schema, stdout belongs to the validated document. Status lines
@@ -319,6 +330,7 @@ async function runPlainConversationBody(
 			},
 			getSystemMessage: () => systemMessage,
 			prepareTurn: () => {
+				emitTelemetry({type: 'turn'});
 				const availableNames = toolManager.getAvailableToolNames(
 					tune,
 					developmentMode,
@@ -520,7 +532,7 @@ async function runPlainConversationBody(
 
 				// Plain mode has no interactive prompt, so a call that needs
 				// approval ends the run before anything executes.
-				if (toolsNeedingApproval.length > 0) {
+				if (toolsNeedingApproval.length > 0 && !refuseUnapproved) {
 					return {
 						kind: 'stop',
 						payload: {
@@ -536,7 +548,24 @@ async function runPlainConversationBody(
 				}
 
 				const toolResults: ToolResult[] = [];
+				for (const toolCall of toolsNeedingApproval) {
+					const content = `⚒ ${toolCall.function.name} needs approval, which this run cannot give. Finish the task without it.`;
+					toolResults.push({
+						tool_call_id: toolCall.id,
+						role: 'tool',
+						name: toolCall.function.name,
+						content,
+						isError: true,
+					});
+					toolCallsLog.push({
+						name: toolCall.function.name,
+						arguments: toolCall.function.arguments || {},
+						result: null,
+						error: content,
+					});
+				}
 				for (const toolCall of toolsToExecute) {
+					emitTelemetry({type: 'tool', tool: toolCall.function.name});
 					if (!isJson) {
 						writeStatus(`tool: ${toolCall.function.name}`);
 					}

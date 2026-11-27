@@ -1,9 +1,11 @@
+import {realpathSync} from 'node:fs';
 import path, {extname} from 'node:path';
 import {getProjectRoot, getSessionCwd} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
 import {isDerivedContentPath} from '@/utils/fs/derived-content';
 import type {CachedFile} from '@/utils/fs/file-cache';
 import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {getRestrictedScope, isPathInScope} from '@/utils/restricted-scope';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
 
@@ -37,8 +39,44 @@ function isInSystemDirectory(absPath: string): boolean {
 	});
 }
 
+/** Follows symlinks as far as the path exists, keeping the rest as written. */
+function realPathOfExisting(absPath: string): string {
+	try {
+		return realpathSync(absPath);
+	} catch {
+		const parent = path.dirname(absPath);
+		if (parent === absPath) return absPath;
+		return path.join(realPathOfExisting(parent), path.basename(absPath));
+	}
+}
+
 /**
- * Validates a single file path: checks format and project boundary.
+ * Checks the path both as written and with symlinks followed, so a link inside
+ * the scope cannot be used to write outside it.
+ */
+function restrictedScopeError(
+	absPath: string,
+	original: string,
+	root: string,
+): string | undefined {
+	const scope = getRestrictedScope();
+	if (!scope) return undefined;
+
+	const allowed =
+		isPathInScope(path.relative(root, absPath), scope) &&
+		isPathInScope(
+			path.relative(realPathOfExisting(root), realPathOfExisting(absPath)),
+			scope,
+		);
+	if (allowed) return undefined;
+
+	const listed = scope.map(entry => entry || '.').join(', ');
+	return `⚒ "${original}" is outside the paths this run may edit: ${listed}`;
+}
+
+/**
+ * Validates a single file path: checks format, project boundary and the
+ * restricted scope.
  */
 export function validatePath(path: string): ValidationResult {
 	const cwd = getSessionCwd();
@@ -67,6 +105,9 @@ export function validatePath(path: string): ValidationResult {
 			error: `⚒ Cannot write files to system directory: "${path}"`,
 		};
 	}
+
+	const scopeError = restrictedScopeError(resolved, path, root);
+	if (scopeError) return {valid: false, error: scopeError};
 
 	return {valid: true};
 }
@@ -165,6 +206,13 @@ export function validatePathPair(
 			error: `⚒ Cannot move file from system directory: "${source}"`,
 		};
 	}
+
+	const scopeError =
+		restrictedScopeError(resolvedDestination, destination, root) ??
+		(isMove
+			? restrictedScopeError(resolveFilePath(source, cwd, root), source, root)
+			: undefined);
+	if (scopeError) return {valid: false, error: scopeError};
 
 	return {valid: true};
 }

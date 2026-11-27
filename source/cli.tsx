@@ -272,6 +272,16 @@ Commands:
                                   on stdout and progress on stderr.
   worktree <PR-number> [options]  Start an interactive session in a new worktree for a GitHub PR.
                                   Accepts the global options below, e.g. --provider, --mode.
+  swarm "<goal>" [options]        Split a goal into tasks and run one agent per task in
+                                  separate Git worktrees. Needs a terminal, a trusted
+                                  folder and a clean tree.
+                                  --workers <1-10>     Maximum parallel agents (default 4).
+                                  --swarm-mode <mode>  review (default) saves patches only;
+                                  apply asks before applying them; yolo runs workers in
+                                  yolo mode and applies without asking.
+                                  --timeout <minutes>  Limit for planning and workers (default 30).
+                                  Also takes --provider, --model, --profile, --context-max
+                                  and --trust-directory.
   daemon <subcommand>             Manage the per-project skill daemon.
                                   Subcommands: start, stop, status, logs, install, uninstall.
                                   start [--trust <comment-only|auto-fix|full-commit>]
@@ -321,8 +331,13 @@ Options:
   --json-schema       Validate the final run answer against a JSON Schema.
                       Takes a schema file path or inline JSON (quote it).
                       Uses the plain runtime and retries invalid answers.
+  --restricted-scope  Comma-separated paths the file editing tools may change.
+                      Shell commands are not covered. Valid with "run"; calls
+                      that need approval are refused instead of ending the run.
+  --telemetry         Print one JSON line to stderr per model turn and tool call.
+                      Valid with plain "run" sessions.
   --trust-directory   Skip the first-run directory trust prompt for this run only.
-                      Valid with "run", "review", "daemon start", "verify" and --acp.
+                      Valid with "run", "review", "swarm", "daemon start", "verify" and --acp.
                       Does not modify the preferences file.
   --plain             Use a lightweight, Ink-free runtime for non-interactive runs.
                       Only valid with the "run" command. Auto-enables in CI / non-TTY.
@@ -366,6 +381,7 @@ Examples:
   nanocoder review 42
   nanocoder worktree 42
   nanocoder worktree 42 --mode plan
+  nanocoder swarm "add unit tests for the utils folder" --workers 3
   nanocoder --continue
   nanocoder --resume last
   nanocoder --resume
@@ -576,6 +592,30 @@ async function main(): Promise<void> {
 		break;
 	}
 
+	// Handled before the `run` options below: a goal containing the word "run"
+	// must not be read as that command.
+	if (args[0] === 'swarm') {
+		const {parseSwarmArgs} = await import('./cli-args.js');
+		const swarm = parseSwarmArgs(args);
+		if ('error' in swarm) {
+			console.error(swarm.error);
+			process.exit(1);
+		}
+		await loadProjectEnv();
+		const {runSwarmCommand} = await import('@/swarm/run-swarm');
+		await runSwarmCommand({
+			config: swarm.config,
+			trustDirectory: swarm.trustDirectory,
+			cliProvider,
+			cliModel,
+			workerOptions: [
+				...(cliProfile ? ['--profile', cliProfile] : []),
+				...(contextMaxValue ? ['--context-max', contextMaxValue] : []),
+			],
+		});
+		return;
+	}
+
 	// Resolve and validate active profile (fail fast on unknown profile)
 	let profileMode: CliMode | undefined;
 	const {resolveActiveProfile} = await import('@/config/profile');
@@ -628,6 +668,27 @@ async function main(): Promise<void> {
 	const runCommandIndex = args.indexOf('run');
 	const isRunCommand = runCommandIndex !== -1;
 	let nonInteractivePrompt = parseRunPrompt(args);
+
+	// --restricted-scope: the only paths the file editing tools may change.
+	const scopeIndex = args.findIndex(
+		arg =>
+			arg === '--restricted-scope' || arg.startsWith('--restricted-scope='),
+	);
+	if (scopeIndex !== -1) {
+		const value = args[scopeIndex].startsWith('--restricted-scope=')
+			? args[scopeIndex].slice('--restricted-scope='.length)
+			: args[scopeIndex + 1];
+		const scope = (value ?? '').split(',').filter(entry => entry.trim());
+		if (!isRunCommand || value?.startsWith('-') || scope.length === 0) {
+			console.error(
+				'--restricted-scope takes a comma-separated list of paths and is only valid with "run".',
+			);
+			process.exit(1);
+		}
+		const {setRestrictedScope} = await import('@/utils/restricted-scope');
+		setRestrictedScope(scope);
+	}
+	const telemetry = args.includes('--telemetry');
 
 	// --json-schema: validate the final `run` answer against a user schema.
 	// The value is a file path or inline JSON; loading it here means a typo
@@ -894,6 +955,11 @@ async function main(): Promise<void> {
 	const plainMode =
 		plainRequested || plainAuto || plainForJson || plainForSchema;
 
+	if (telemetry && !plainMode) {
+		console.error('--telemetry is only available for plain `run` sessions.');
+		process.exit(1);
+	}
+
 	// Non-TTY, CI, and --output-format json run the review without Ink.
 	// A TTY without JSON still opens the interactive review.
 	const reviewHeadless =
@@ -1003,6 +1069,7 @@ async function main(): Promise<void> {
 			trustDirectory,
 			outputFormat,
 			jsonSchema,
+			telemetry,
 		});
 	} else {
 		// Interactive TUI — load Ink + App only now, with React's production

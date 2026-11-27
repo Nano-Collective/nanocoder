@@ -2,8 +2,7 @@ import test from 'ava';
 import {
 	parseWorktreeArgs,
 	validateCliArgs,
-	validateInitArgs,
-} from './cli-args.js';
+	validateInitArgs, parseSwarmArgs} from './cli-args.js';
 
 test('suggests the correct option for a transposed unknown flag', t => {
 	t.is(
@@ -55,6 +54,67 @@ test('does not validate free-form prompt tokens after run', t => {
 test('accepts review targets and resume session identifiers', t => {
 	t.is(validateCliArgs(['review', 'main']), undefined);
 	t.is(validateCliArgs(['--resume', 'last']), undefined);
+});
+
+test('parseSwarmArgs reads the goal and its options', t => {
+	t.deepEqual(parseSwarmArgs(['swarm', 'add tests']), {
+		config: {
+			prompt: 'add tests',
+			workers: 4,
+			swarmMode: 'review',
+			timeoutMs: 1_800_000,
+		},
+		trustDirectory: false,
+	});
+	t.deepEqual(
+		parseSwarmArgs([
+			'swarm',
+			'--workers=3',
+			'--swarm-mode',
+			'apply',
+			'--model',
+			'swarm',
+			'--timeout',
+			'5',
+			'--trust-directory',
+			'add',
+			'tests',
+		]),
+		{
+			config: {
+				prompt: 'add tests',
+				workers: 3,
+				swarmMode: 'apply',
+				timeoutMs: 300_000,
+			},
+			trustDirectory: true,
+		},
+	);
+});
+
+test('parseSwarmArgs rejects bad input', t => {
+	const error = (...args: string[]) => {
+		const result = parseSwarmArgs(['swarm', ...args]);
+		return 'error' in result ? result.error : '';
+	};
+	t.regex(error(), /^Usage: nanocoder swarm/);
+	t.regex(error('   '), /^Usage: nanocoder swarm/);
+	for (const value of ['0', '11', '2.5', 'many', '-1']) {
+		t.regex(error('--workers', value, 'x'), /Invalid --workers value/, value);
+	}
+	t.regex(error('x', '--workers'), /Invalid --workers value/);
+	t.regex(error('--swarm-mode', 'now', 'x'), /Invalid --swarm-mode value/);
+	t.regex(error('--timeout', '0', 'x'), /Invalid --timeout value/);
+	t.regex(error('--mode', 'yolo', 'x'), /--mode/);
+	t.regex(error('--worker', '2', 'x'), /--worker/);
+});
+
+test('validateCliArgs checks swarm options', t => {
+	t.is(
+		validateCliArgs(['swarm', '--workers', '3', '--swarm-mode', 'apply', 'task']),
+		undefined,
+	);
+	t.regex(validateCliArgs(['swarm']) ?? '', /^Usage: nanocoder swarm/);
 });
 
 test('review rejects unknown options instead of calling them extra targets', t => {

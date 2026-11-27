@@ -71,6 +71,8 @@ export interface RunPlainShellOptions {
 	 * `--output-format json` mode.
 	 */
 	jsonSchema?: JsonSchemaDocument;
+	/** Report model turns and tool calls as JSON lines on stderr. */
+	telemetry?: boolean;
 	/**
 	 * Injectable seams for testing. Each defaults to the real implementation,
 	 * so production call sites never need to pass this. Mirrors the pattern
@@ -131,6 +133,7 @@ export async function runPlainShell(
 		trustDirectory,
 		outputFormat,
 		jsonSchema,
+		telemetry,
 	} = options;
 
 	const deps: RunPlainShellDeps = {...defaultDeps, ...options.deps};
@@ -399,6 +402,7 @@ export async function runPlainShell(
 			sessionId,
 			workingDirectory: process.cwd(),
 			jsonSchema,
+			telemetry,
 		});
 		outcome = await conversationPromise;
 	} catch (error) {

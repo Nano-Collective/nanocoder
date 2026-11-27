@@ -56,6 +56,10 @@ export const COMPLETION_SUBCOMMANDS: readonly CompletionSubcommand[] = [
 		description: 'Start in a new worktree for a GitHub PR',
 	},
 	{
+		name: 'swarm',
+		description: 'Split a goal across parallel agents in Git worktrees',
+	},
+	{
 		name: 'verify',
 		description: 'Headless, read-only PR review (--pr <n>)',
 	},
@@ -159,6 +163,17 @@ export const COMPLETION_FLAGS: readonly CompletionFlag[] = [
 		takesValue: false,
 		description:
 			'Skip the first-run directory trust prompt (run, review, daemon start)',
+	},
+	{
+		name: 'restricted-scope',
+		takesValue: true,
+		valueName: 'paths',
+		description: 'Limit file editing tools to these paths (run)',
+	},
+	{
+		name: 'telemetry',
+		takesValue: false,
+		description: 'Print turn and tool events to stderr (plain run)',
 	},
 	{
 		name: 'plain',

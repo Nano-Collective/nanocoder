@@ -112,7 +112,8 @@
 		"undici": "^8.12.3",
 		"wrap-ansi": "^10.0.0",
 		"ws": "^8.18.0",
-		"yaml": "^2.8.3"
+		"yaml": "^2.8.3",
+		"zod": "^4.6.7"
 	},
 	"devDependencies": {
 		"@ava/typescript": "^7.0.0",

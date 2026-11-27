@@ -2,12 +2,21 @@ import {
 	RUN_FLAGS_STANDALONE,
 	RUN_FLAGS_WITH_VALUES,
 } from './run-prompt-args.js';
+import {
+	DEFAULT_SWARM_TIMEOUT_MINUTES,
+	DEFAULT_SWARM_WORKERS,
+	MAX_SWARM_WORKERS,
+	SWARM_MODES,
+	type SwarmConfig,
+	type SwarmMode,
+} from './swarm/types.js';
 
 /** Top-level commands. Exported so the completion spec can be checked against it. */
 export const COMMANDS = [
 	'run',
 	'review',
 	'worktree',
+	'swarm',
 	'init',
 	'copilot',
 	'codex',
@@ -49,7 +58,12 @@ interface FlagSet {
 }
 
 /** Flags whose value may legitimately start with `-` (a negative number). */
-const NEGATIVE_VALUE_FLAGS = new Set(['--context-max', '--vscode-port']);
+const NEGATIVE_VALUE_FLAGS = new Set([
+	'--context-max',
+	'--vscode-port',
+	'--workers',
+	'--timeout',
+]);
 
 const GLOBAL_FLAGS: FlagSet = {
 	withValues: [...FLAGS_WITH_VALUES],
@@ -265,6 +279,87 @@ export function parseWorktreeArgs(
 	return {positionals: values};
 }
 
+const SWARM_USAGE =
+	'Usage: nanocoder swarm "<goal>" [--workers 1-10] [--swarm-mode review|apply|yolo] [--timeout <minutes>]';
+
+/** `swarm` takes only these: any other option would be silently ignored. */
+const SWARM_FLAGS: FlagSet = {
+	withValues: [
+		'--provider',
+		'--model',
+		'--profile',
+		'--context-max',
+		'--workers',
+		'--swarm-mode',
+		'--timeout',
+	],
+	withoutValues: ['--trust-directory'],
+};
+
+function flagValue(args: string[], flag: string): string | undefined {
+	const index = args.findIndex(
+		arg => arg === flag || arg.startsWith(`${flag}=`),
+	);
+	if (index === -1) return undefined;
+	return args[index] === flag
+		? (args[index + 1] ?? '')
+		: args[index].slice(flag.length + 1);
+}
+
+export function parseSwarmArgs(
+	args: string[],
+): {config: SwarmConfig; trustDirectory: boolean} | {error: string} {
+	const {positionals, error} = scanArgs(args, 1, args.length, SWARM_FLAGS);
+	if (error) return {error};
+
+	const prompt = positionals
+		.map(index => args[index])
+		.join(' ')
+		.trim();
+	if (!prompt) return {error: SWARM_USAGE};
+
+	const integer = (value: string) =>
+		/^\d+$/.test(value) ? Number(value) : Number.NaN;
+
+	const workersValue = flagValue(args, '--workers');
+	const workers =
+		workersValue === undefined ? DEFAULT_SWARM_WORKERS : integer(workersValue);
+	if (!(workers >= 1 && workers <= MAX_SWARM_WORKERS)) {
+		return {
+			error: `Invalid --workers value: "${workersValue}". Must be an integer between 1 and ${MAX_SWARM_WORKERS}.`,
+		};
+	}
+
+	const modeValue = flagValue(args, '--swarm-mode') ?? 'review';
+	if (!(SWARM_MODES as readonly string[]).includes(modeValue)) {
+		return {
+			error: `Invalid --swarm-mode value: "${modeValue}". Must be 'review', 'apply', or 'yolo'.`,
+		};
+	}
+
+	const timeoutValue = flagValue(args, '--timeout');
+	const minutes =
+		timeoutValue === undefined
+			? DEFAULT_SWARM_TIMEOUT_MINUTES
+			: integer(timeoutValue);
+	// A day, which also keeps the delay within what a timer accepts.
+	if (!(minutes >= 1 && minutes <= 1440)) {
+		return {
+			error: `Invalid --timeout value: "${timeoutValue}". Must be a whole number of minutes between 1 and 1440.`,
+		};
+	}
+
+	return {
+		config: {
+			prompt,
+			workers,
+			swarmMode: modeValue as SwarmMode,
+			timeoutMs: minutes * 60_000,
+		},
+		trustDirectory: args.includes('--trust-directory'),
+	};
+}
+
 /**
  * Reject options `nanocoder init` does not honour. `init` has its own fast
  * path in `cli.tsx` that runs before the global scan, so it calls this
@@ -294,6 +389,11 @@ export function validateCliArgs(args: string[]): string | undefined {
 
 	if (args[0] === 'worktree') {
 		const result = parseWorktreeArgs(args);
+		return 'error' in result ? result.error : undefined;
+	}
+
+	if (args[0] === 'swarm') {
+		const result = parseSwarmArgs(args);
 		return 'error' in result ? result.error : undefined;
 	}
 

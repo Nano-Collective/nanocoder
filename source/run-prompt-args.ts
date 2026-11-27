@@ -25,6 +25,7 @@ const VALUED_FLAGS = [
 	'--prompt-file',
 	'--json-schema',
 	'--profile',
+	'--restricted-scope',
 ] as const;
 
 /** A flag standing alone. */
@@ -41,6 +42,7 @@ const BARE_FLAGS = [
 	// the first two words of their prompt.
 	'--mouse',
 	'--no-mouse',
+	'--telemetry',
 ] as const;
 
 /**

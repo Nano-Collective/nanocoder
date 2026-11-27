@@ -1,5 +1,8 @@
 import {parse as parsePath} from 'node:path';
+import {mkdirSync, mkdtempSync, rmSync, symlinkSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import test from 'ava';
+import {setRestrictedScope} from '@/utils/restricted-scope';
 import {
 	resetSessionCwd,
 	setProjectRoot,
@@ -263,3 +266,44 @@ test.serial(
 		}
 	},
 );
+
+test.serial('restricted scope limits writes and moves', t => {
+	t.teardown(() => setRestrictedScope(undefined));
+	setRestrictedScope(['source/utils/', 'README.md']);
+
+	t.true(validatePath('source/utils/new.ts').valid);
+	t.true(validatePath('README.md').valid);
+	const outside = validatePath('source/cli.tsx');
+	t.false(outside.valid);
+	t.regex(
+		outside.valid ? '' : outside.error,
+		/outside the paths this run may edit: source\/utils, README\.md/,
+	);
+	t.false(validatePath('source/utils/../cli.tsx').valid);
+
+	t.false(validatePathPair('README.md', 'other.md', false).valid);
+	t.true(validatePathPair('package.json', 'source/utils/p.json', false).valid);
+	t.false(validatePathPair('package.json', 'source/utils/p.json', true).valid);
+});
+
+test.serial('restricted scope follows symlinks', t => {
+	if (process.platform === 'win32') {
+		t.pass();
+		return;
+	}
+	const previous = process.cwd();
+	const dir = mkdtempSync(`${tmpdir()}/nanocoder-scope-`);
+	t.teardown(() => {
+		setRestrictedScope(undefined);
+		process.chdir(previous);
+		rmSync(dir, {recursive: true, force: true});
+	});
+	mkdirSync(`${dir}/allowed`);
+	mkdirSync(`${dir}/private`);
+	symlinkSync(`${dir}/private`, `${dir}/allowed/link`);
+	process.chdir(dir);
+	setRestrictedScope(['allowed']);
+
+	t.true(validatePath('allowed/file.ts').valid);
+	t.false(validatePath('allowed/link/file.ts').valid);
+});
