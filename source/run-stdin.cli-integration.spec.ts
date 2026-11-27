@@ -215,6 +215,13 @@ const isWindows = process.platform === 'win32';
 					});
 					child.once('error', reject);
 					child.once('close', status => resolve({status, stderr}));
+					child.stdin.on('error', error => {
+						// The CLI intentionally stops reading after the stdin cap, so
+						// a larger test payload can close the pipe before this write ends.
+						if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
+							reject(error);
+						}
+					});
 					child.stdin.end('x'.repeat(150_000));
 				},
 			);
