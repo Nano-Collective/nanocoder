@@ -73,6 +73,7 @@ export const contextMaxCommand: StatefulCommand = {
 			'provider-model-config': 'provider model config',
 			'provider-config': 'provider config',
 			env: 'NANOCODER_CONTEXT_LIMIT env',
+			server: 'reported by the inference server',
 			'model-lookup': 'model lookup',
 			unknown: 'unknown',
 		} as const;

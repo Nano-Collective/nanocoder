@@ -17,6 +17,7 @@ import type {
 	ModelsDevModel,
 	ModelsDevProvider,
 } from './models-types.js';
+import {probeServerContextLimit} from './server-context-probe.js';
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 
@@ -461,6 +462,7 @@ export type ContextLimitSource =
 	| 'provider-model-config'
 	| 'provider-config'
 	| 'env'
+	| 'server'
 	| 'model-lookup'
 	| 'unknown';
 
@@ -521,8 +523,9 @@ function getProviderConfiguredContextLimit(
  * 2. Provider model config override
  * 3. Provider default context window
  * 4. NANOCODER_CONTEXT_LIMIT env variable
- * 5. models.dev lookup / hardcoded Ollama defaults
- * 6. null (unknown)
+ * 5. Context window reported by the inference server (Ollama, llama.cpp, vLLM)
+ * 6. models.dev lookup / hardcoded Ollama defaults
+ * 7. null (unknown)
  */
 export async function resolveModelContextLimit(
 	modelId: string,
@@ -554,6 +557,16 @@ export async function resolveModelContextLimit(
 			if (parsed !== null) {
 				return {limit: parsed, source: 'env'};
 			}
+		}
+
+		// Prefer what the server is actually serving over catalogue values.
+		// Any probe failure resolves to null and falls through below.
+		const serverLimit = await probeServerContextLimit(
+			options.providerConfig,
+			modelId,
+		);
+		if (serverLimit) {
+			return {limit: serverLimit, source: 'server'};
 		}
 
 		// Strip :cloud or -cloud suffix if present (Ollama cloud models)

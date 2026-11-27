@@ -14,6 +14,7 @@ export const TIMEOUT_WEB_SEARCH_MS = 10_000;
 export const TIMEOUT_VSCODE_EXTENSION_SKIP_MS = 3000;
 export const TIMEOUT_HTTP_HEADERS_MS = 10_000;
 export const TIMEOUT_HTTP_BODY_MS = 30_000;
+export const TIMEOUT_CONTEXT_PROBE_MS = 2000; // Overall cap when asking a local server for its context window
 export const TIMEOUT_UPDATE_CHECK_MS = 10_000;
 export const TIMEOUT_SOCKET_DEFAULT_MS = 120_000;
 export const TIMEOUT_SOCKET_LOCAL_DEFAULT_MS = 600_000; // 10 minutes for local models (Ollama, etc.)
