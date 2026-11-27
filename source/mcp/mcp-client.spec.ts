@@ -2779,3 +2779,73 @@ test('MCPClient.callTool: measures data URL and wrapped base64 by decoded size',
 	]);
 	t.is(out, '[image/png, 2 bytes]\n[audio/wav, 6 bytes]');
 });
+
+// ============================================================================
+// Paginated list results (nextCursor)
+// ============================================================================
+
+// Serves two pages per list method, as a server with a small page size does.
+const paginatedSdkClient = () => {
+	const page = (key: string, params?: {cursor?: string}) =>
+		params?.cursor === 'page-2'
+			? {[key]: [{name: `${key}_2`, uri: `file:///${key}_2`}]}
+			: {
+					[key]: [{name: `${key}_1`, uri: `file:///${key}_1`}],
+					nextCursor: 'page-2',
+				};
+	return {
+		async connect() {},
+		getServerCapabilities: () => ({resources: {}, prompts: {}}),
+		async listTools(params?: {cursor?: string}) {
+			return page('tools', params);
+		},
+		async listResources(params?: {cursor?: string}) {
+			return page('resources', params);
+		},
+		async listPrompts(params?: {cursor?: string}) {
+			return page('prompts', params);
+		},
+		async close() {},
+	};
+};
+
+test('MCPClient.connectToServer: follows nextCursor for tools, resources and prompts', async t => {
+	const client = new SeamMCPClient(paginatedSdkClient());
+
+	await client.connectToServer(httpServer);
+
+	t.deepEqual(
+		client.getServerTools(httpServer.name).map(tool => tool.name),
+		['tools_1', 'tools_2'],
+	);
+	t.deepEqual(
+		client.getServerResources(httpServer.name).map(r => r.name),
+		['resources_1', 'resources_2'],
+	);
+	t.deepEqual(
+		client.getServerPrompts(httpServer.name).map(p => p.name),
+		['prompts_1', 'prompts_2'],
+	);
+
+	await client.disconnect();
+});
+
+test('MCPClient.connectToServer: stops paging when a server repeats a cursor', async t => {
+	let calls = 0;
+	const client = new SeamMCPClient({
+		async connect() {},
+		getServerCapabilities: () => ({}),
+		async listTools() {
+			calls++;
+			if (calls > 5) throw new Error('paging did not stop');
+			return {tools: [{name: `tool_${calls}`}], nextCursor: 'same'};
+		},
+		async close() {},
+	});
+
+	await client.connectToServer(httpServer);
+
+	t.is(calls, 2);
+
+	await client.disconnect();
+});
