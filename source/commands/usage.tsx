@@ -210,7 +210,12 @@ export const usageCommand: Command = {
 				// ---- Cumulative session + per-provider (from history) ----
 				const history = metadata.apiCallHistory ?? [];
 				let cumulativeSession = 0;
-				const perProvider: Record<string, number> = {};
+				let hasPricedCall = false;
+				let hasUnpricedCall = false;
+				const providerTotals: Record<
+					string,
+					{sum: number; hasPricedCall: boolean; hasUnpricedCall: boolean}
+				> = {};
 				const pricingCache = new Map<string, typeof pricing>();
 
 				// Calls made earlier on a local server stay free while a hosted
@@ -238,14 +243,39 @@ export const usageCommand: Command = {
 						? 0
 						: (calculateUsageCost(record, recordPricing) ?? 0);
 
-					cumulativeSession += callCost;
-					perProvider[record.provider] =
-						(perProvider[record.provider] ?? 0) + callCost;
+					// An unpriced call (NaN) must not wipe out the cost of priced calls.
+					// A total stays unknown only if it has no priced call to show.
+					const isPriced = !isLocalCall(record) && Number.isFinite(callCost);
+					const totals = (providerTotals[record.provider] ??= {
+						sum: 0,
+						hasPricedCall: false,
+						hasUnpricedCall: false,
+					});
+					if (Number.isFinite(callCost)) {
+						cumulativeSession += callCost;
+						totals.sum += callCost;
+					} else {
+						hasUnpricedCall = true;
+						totals.hasUnpricedCall = true;
+					}
+					if (isPriced) {
+						hasPricedCall = true;
+						totals.hasPricedCall = true;
+					}
+				}
+
+				const perProvider: Record<string, number> = {};
+				for (const [provider, totals] of Object.entries(providerTotals)) {
+					perProvider[provider] =
+						totals.hasUnpricedCall && !totals.hasPricedCall ? NaN : totals.sum;
 				}
 
 				cost = {
 					currentContext: currentContextCost,
-					cumulativeSession: history.length === 0 ? NaN : cumulativeSession,
+					cumulativeSession:
+						history.length === 0 || (hasUnpricedCall && !hasPricedCall)
+							? NaN
+							: cumulativeSession,
 					perProvider:
 						Object.keys(perProvider).length > 1 ? perProvider : undefined,
 				};

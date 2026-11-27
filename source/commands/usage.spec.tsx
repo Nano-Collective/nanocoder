@@ -566,6 +566,108 @@ test('usage command shows placeholder for a model without pricing', async t => {
 	t.regex(output!, /Cumulative Session:.*—/);
 });
 
+test('usage command keeps Cumulative Session when one call used an unpriced model', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				outputTokens: 200,
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'ollama',
+				model: 'llama3.2:3b',
+				inputTokens: 1000,
+				outputTokens: 500,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Cumulative Session:.*\$/);
+	t.notRegex(output!, /Cumulative Session:.*—/);
+	t.regex(output!, /ollama:.*—/);
+});
+
+test('usage command keeps a provider subtotal when only some of its calls are unpriced', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'gpt-4o'),
+		apiCallHistory: [
+			{
+				provider: 'openai',
+				model: 'gpt-4o',
+				inputTokens: 500,
+				outputTokens: 200,
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'openai',
+				model: 'my-finetune-xyz',
+				inputTokens: 1000,
+				outputTokens: 100,
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'my-proxy',
+				model: 'my-finetune-xyz',
+				inputTokens: 1000,
+				outputTokens: 100,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /openai:.*\$/);
+	t.notRegex(output!, /openai:.*—/);
+	t.regex(output!, /my-proxy:.*—/);
+});
+
+test('usage command shows Cumulative Session as unknown when only local calls and an unpriced call exist', async t => {
+	const messages = createMessages();
+	const metadata = {
+		...createMockMetadata('openai', 'my-finetune-xyz'),
+		apiCallHistory: [
+			{
+				provider: 'ollama',
+				model: 'llama3.2:3b',
+				inputTokens: 1000,
+				outputTokens: 500,
+				baseURL: 'http://localhost:11434/v1',
+				timestamp: Date.now(),
+			},
+			{
+				provider: 'openai',
+				model: 'my-finetune-xyz',
+				inputTokens: 1000,
+				outputTokens: 100,
+				timestamp: Date.now(),
+			},
+		] satisfies ApiCallRecord[],
+	};
+
+	const result = await usageCommand.handler([], messages, metadata);
+	const {lastFrame} = renderWithTheme(result);
+
+	const output = lastFrame();
+	t.truthy(output);
+	t.regex(output!, /Cumulative Session:.*—/);
+});
+
 test('usage command shows per-provider breakdown for multi-provider history', async t => {
 	const messages = createMessages();
 	const metadata = {
