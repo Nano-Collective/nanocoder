@@ -93,15 +93,17 @@ export function readGitSnapshot(root: string): GitSnapshot | null {
 
 	try {
 		const output = execGitReadOnlySync(
-			['status', '--porcelain', '--branch', '--untracked-files=normal'],
+			['status', '--porcelain', '-z', '--branch', '--untracked-files=normal'],
 			{cwd: root},
 		);
-		const lines = output.split('\n');
-		const header = lines[0]?.startsWith('##') ? lines.shift() : undefined;
+		// With -z every record — including the branch header — is
+		// NUL-terminated, and paths are never quoted or escaped (#2448).
+		const records = output.split('\0').filter(record => record.length > 0);
+		const header = records[0]?.startsWith('##') ? records.shift() : undefined;
 		if (header) Object.assign(snapshot, parseBranchHeader(header));
-		const changed = lines.filter(line => line.length >= 3);
+		const changed = records.filter(record => record.length >= 3);
 		const {staged, unstaged, untracked, conflicts} = parseGitStatus(
-			changed.join('\n'),
+			changed.join('\0'),
 		);
 		snapshot.status = {
 			staged: staged.length,

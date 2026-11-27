@@ -43,7 +43,7 @@ async function getCommitPreview(args: GitCommitInput): Promise<{
 	amendWarning: string | null;
 }> {
 	// Get staged files
-	const statusOutput = await execGitReadOnly(['status', '--porcelain']);
+	const statusOutput = await execGitReadOnly(['status', '--porcelain', '-z']);
 	const {staged} = parseGitStatus(statusOutput);
 
 	// Get diff stats
