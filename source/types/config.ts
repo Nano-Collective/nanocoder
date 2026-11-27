@@ -802,6 +802,17 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	aggressiveCompact: false,
 };
 
+/**
+ * Fallback project instruction filenames tried after AGENTS.md. Kept here so
+ * both the prompt resolver and `config show` report the same built-in list.
+ */
+export const DEFAULT_INSTRUCTION_FILES: readonly string[] = [
+	'CLAUDE.md',
+	'GEMINI.md',
+	'.github/copilot-instructions.md',
+	'.cursorrules',
+];
+
 export interface VoiceConfig {
 	enabled: boolean;
 	activationMode: 'push-to-talk' | 'hands-free';

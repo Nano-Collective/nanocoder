@@ -10,6 +10,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'ava';
+import {DEFAULT_INSTRUCTION_FILES} from '@/types/config';
 import {runConfigCli} from './config-cli';
 import {
 	type EffectiveConfig,
@@ -931,6 +932,42 @@ test('every key the loader reads is shown by config show (schema drift)', t => {
 			t.is(notifications.length, 1);
 			t.is(notifications[0]?.key, 'preferences.notifications');
 			t.is((notifications[0]?.value as {enabled: boolean}).enabled, true);
+		},
+	);
+});
+
+test('config show reports instructionFiles from the user-level config only', t => {
+	withFixture(
+		{
+			projectAgents: {nanocoder: {instructionFiles: ['PROJECT.md']}},
+			globalAgents: {nanocoder: {instructionFiles: ['USER.md']}},
+		},
+		paths => {
+			const config = resolveEffectiveConfig();
+			const files = entry(config, 'nanocoder.instructionFiles');
+
+			t.deepEqual(files?.value, ['USER.md']);
+			t.is(files?.layer, 'global');
+			t.is(files?.origin, join(paths.configDir, 'agents.config.json'));
+			t.is(files?.shadowed.length, 1);
+			t.is(files?.shadowed[0]?.layer, 'project');
+			t.deepEqual(files?.shadowed[0]?.value, ['PROJECT.md']);
+		},
+	);
+});
+
+test('config show does not let a project instructionFiles list become effective', t => {
+	withFixture(
+		{projectAgents: {nanocoder: {instructionFiles: ['PROJECT.md']}}},
+		() => {
+			const config = resolveEffectiveConfig();
+			const files = entry(config, 'nanocoder.instructionFiles');
+
+			t.deepEqual(files?.value, [...DEFAULT_INSTRUCTION_FILES]);
+			t.is(files?.layer, 'default');
+			t.is(files?.origin, 'built-in');
+			t.is(files?.shadowed.length, 1);
+			t.is(files?.shadowed[0]?.layer, 'project');
 		},
 	);
 });

@@ -22,18 +22,15 @@ import {getAppConfig} from '@/config/index';
 import {MAX_TOOL_RESULT_CHARS} from '@/constants';
 import {truncateToolResult} from '@/tools/runtime/truncate-tool-result';
 import {isNanoProfile} from '@/tools/tool-profiles';
-import type {TuneConfig} from '@/types/config';
-import {TUNE_DEFAULTS} from '@/types/config';
+import {
+	DEFAULT_INSTRUCTION_FILES,
+	TUNE_DEFAULTS,
+	type TuneConfig,
+} from '@/types/config';
 import {loadGitignore} from '@/utils/fs/gitignore-loader';
 import {isPathInside} from '@/utils/fs/path-validation';
 
-/** Fallback filenames tried in order after AGENTS.md. */
-export const DEFAULT_INSTRUCTION_FILES: readonly string[] = [
-	'CLAUDE.md',
-	'GEMINI.md',
-	'.github/copilot-instructions.md',
-	'.cursorrules',
-];
+export {DEFAULT_INSTRUCTION_FILES};
 
 export interface ProjectInstructionFile {
 	/** Filename from the configured list, e.g. `CLAUDE.md`. */
