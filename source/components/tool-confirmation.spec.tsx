@@ -233,6 +233,25 @@ test('pressing Enter on the "No" option declines the tool', async t => {
 	);
 });
 
+test('Down and Enter arriving in one input chunk decline the tool instead of executing it', async t => {
+	const {stdin, lastFrame, record} = mountConfirmation(
+		t,
+		{},
+		{path: 'a.txt'},
+	);
+	await waitForPrompt(lastFrame);
+	await yieldToInputSubscription();
+
+	stdin.write('\u001B[B\r');
+
+	await waitUntil(() => record.confirmations.length > 0);
+	t.deepEqual(
+		record.confirmations,
+		[false],
+		'chunked Down+Enter must select "No, cancel execution" and not approve the tool',
+	);
+});
+
 test('pressing Escape cancels the confirmation', async t => {
 	const {stdin, record} = mountConfirmation(t, {}, {path: 'a.txt'});
 

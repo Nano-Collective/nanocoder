@@ -150,6 +150,8 @@ You can reference environment variables in your configuration files using substi
 
 **Syntax:** `$VAR_NAME`, `${VAR_NAME}`, or `${VAR_NAME:-default}` (use `$$` to escape a literal `$`, e.g. `pa$$WORD`)
 
+As in the shell, `${VAR_NAME:-default}` uses the default when the variable is unset or set to an empty value. `$VAR_NAME` and `${VAR_NAME}` substitute an empty value as is.
+
 Substitution is applied recursively to all string fields in provider and MCP server configurations — any string value can reference environment variables, not just specific fields.
 
 Variable names must be uppercase (letters, digits and underscores, not starting with a digit). A lowercase reference such as `$myVar` or `${api_key}` is not substituted and is left in the value as literal text.

@@ -26,12 +26,14 @@ function expandEnvVar(str: string): string {
 
 			const envValue = process.env[varName];
 
-			if (envValue !== undefined) {
-				return envValue;
+			// Like the shell's `${VAR:-default}`, the default applies when VAR is
+			// unset or empty. Bare `$VAR` and `${VAR}` keep an empty value.
+			if (defaultValue !== undefined && !envValue) {
+				return defaultValue.replace(/\$\$/g, '$');
 			}
 
-			if (defaultValue !== undefined) {
-				return defaultValue.replace(/\$\$/g, '$');
+			if (envValue !== undefined) {
+				return envValue;
 			}
 
 			notifyError(

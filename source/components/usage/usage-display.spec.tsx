@@ -470,6 +470,9 @@ test('UsageDisplay handles null context limit', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /Unknown/); // Should display "Unknown" for context limit
+	t.notRegex(output!, /\b0%/);
+	t.notRegex(output!, /Available:.*0 tokens/);
+	t.regex(output!, /Available:.*unknown \(set one with \/context-max\)/);
 });
 
 test('UsageDisplay handles zero current tokens', t => {
@@ -536,7 +539,9 @@ test('UsageDisplay handles 100% usage', t => {
 	const output = lastFrame();
 	t.truthy(output);
 	t.regex(output!, /100%/);
-	t.regex(output!, /Available:.*0 tokens/); // 0 tokens available
+	// Allow ANSI color codes between the label and value (CI enables FORCE_COLOR).
+	t.regex(output!, /Available:.*0 tokens/);
+	t.notRegex(output!, /over by/);
 });
 
 test('UsageDisplay handles over 100% usage', t => {
@@ -555,8 +560,9 @@ test('UsageDisplay handles over 100% usage', t => {
 
 	const output = lastFrame();
 	t.truthy(output);
-	// Should handle gracefully, though this is an edge case
 	t.regex(output!, /\d+%/); // Should display some percentage
+	t.notRegex(output!, /Available:.*-\d/);
+	t.regex(output!, /Available:.*0 tokens \(over by 1,000\)/);
 });
 
 test('UsageDisplay displays warning color for moderate usage', t => {

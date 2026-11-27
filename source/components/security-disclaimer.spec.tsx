@@ -230,3 +230,26 @@ test('SecurityDisclaimer names the plugins and hooks in the folder', t => {
 		rmSync(root, {recursive: true, force: true});
 	}
 });
+
+test('SecurityDisclaimer exits instead of trusting when Down and Enter arrive in one input chunk', async t => {
+	let confirmed = 0;
+	let exited = 0;
+	const {stdin, unmount} = renderWithTheme(
+		<SecurityDisclaimer
+			onConfirm={() => {
+				confirmed += 1;
+			}}
+			onExit={() => {
+				exited += 1;
+			}}
+		/>,
+	);
+	t.teardown(() => unmount());
+
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('\u001B[B\r');
+	await new Promise(resolve => setTimeout(resolve, 50));
+
+	t.is(exited, 1, 'chunked Down+Enter must select "No, exit"');
+	t.is(confirmed, 0, 'chunked Down+Enter must not confirm trust');
+});
