@@ -19,7 +19,9 @@ import {
 	clearStatsLedger,
 	createEmptyLedger,
 	readStatsLedger,
+	readStatsLedgerAsync,
 	writeStatsLedger,
+	writeStatsLedgerAsync,
 } from './storage';
 import {parsePairKey, type StatsLedger} from './types';
 
@@ -32,6 +34,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let dirty = false;
 let shutdownRegistered = false;
 let resetGeneration = 0;
+let inFlight: Promise<void> | null = null;
 
 /** Test/helpers: reset module state. */
 export function _resetStatsRecorderForTests(): void {
@@ -81,7 +84,7 @@ export function ensureStatsFlushOnShutdown(): void {
 			// Before TUI teardown (0), after session autosave (-10).
 			priority: -5,
 			handler: async () => {
-				finalizeStatsForExit();
+				await finalizeStatsForExit();
 			},
 		});
 	} catch {
@@ -95,7 +98,7 @@ function scheduleFlush(): void {
 	if (flushTimer) return;
 	flushTimer = setTimeout(() => {
 		flushTimer = null;
-		flushStatsLedgerSync();
+		void flushStatsLedgerAsync();
 	}, FLUSH_DEBOUNCE_MS);
 	// Don't keep the process alive solely for stats flush — exit paths
 	// must call finalizeStatsForExit / shutdown handler instead.
@@ -104,23 +107,19 @@ function scheduleFlush(): void {
 	}
 }
 
-/** Force a synchronous flush (tests / shutdown). */
-export function flushStatsLedgerSync(): void {
-	if (!dirty || !pending) return;
-
-	const merged = readStatsLedger();
-	for (const day of pending.daily) {
+function applyBatch(target: StatsLedger, batch: StatsLedger): void {
+	for (const day of batch.daily) {
 		if (day.sessions > 0) {
-			applySessionIncrement(merged, day.date, day.sessions);
+			applySessionIncrement(target, day.date, day.sessions);
 		}
 		for (const [key, usage] of Object.entries(day.byPair)) {
 			const {provider, model} = parsePairKey(key);
 			if (usage.prompts > 0) {
-				applyPromptIncrement(merged, provider, model, day.date, usage.prompts);
+				applyPromptIncrement(target, provider, model, day.date, usage.prompts);
 			}
 			if (usage.tokens > 0) {
 				applyTokenIncrement(
-					merged,
+					target,
 					provider,
 					model,
 					usage.tokens,
@@ -130,6 +129,15 @@ export function flushStatsLedgerSync(): void {
 			}
 		}
 	}
+}
+
+/** Force a synchronous flush (tests / shutdown). */
+export function flushStatsLedgerSync(): void {
+	if (inFlight) return;
+	if (!dirty || !pending) return;
+
+	const merged = readStatsLedger();
+	applyBatch(merged, pending);
 	if (!writeStatsLedger(merged)) {
 		return;
 	}
@@ -139,13 +147,75 @@ export function flushStatsLedgerSync(): void {
 }
 
 /**
+ * Debounced flush: same read-merge-write as the sync version, but the file I/O
+ * is async. Calls while a flush is running join it instead of starting another.
+ */
+export function flushStatsLedgerAsync(): Promise<void> {
+	if (!inFlight) {
+		inFlight = runAsyncFlush().finally(() => {
+			inFlight = null;
+		});
+	}
+	return inFlight;
+}
+
+async function runAsyncFlush(): Promise<void> {
+	if (!dirty || !pending) return;
+
+	const generation = resetGeneration;
+	// Take the batch out BEFORE the first await so increments recorded while we
+	// are writing land in a fresh `pending` instead of being wiped afterwards.
+	const batch = pending;
+	pending = null;
+	dirty = false;
+
+	const restoreBatch = () => {
+		if (generation !== resetGeneration) return;
+		if (pending) {
+			applyBatch(pending, batch);
+		} else {
+			pending = batch;
+		}
+		dirty = true;
+	};
+
+	try {
+		const merged = await readStatsLedgerAsync();
+		if (generation !== resetGeneration) return;
+		applyBatch(merged, batch);
+		const written = await writeStatsLedgerAsync(
+			merged,
+			() => generation === resetGeneration,
+		);
+		if (generation !== resetGeneration) return;
+		if (!written) {
+			restoreBatch();
+			return;
+		}
+
+		cached = merged;
+		if (pending) {
+			applyBatch(cached, pending);
+		}
+	} catch {
+		restoreBatch();
+		return;
+	}
+
+	if (dirty) scheduleFlush();
+}
+
+/**
  * Cancel debounce and flush immediately. Call at the end of plain/headless
  * runs and from the shutdown handler.
  */
-export function finalizeStatsForExit(): void {
+export async function finalizeStatsForExit(): Promise<void> {
 	if (flushTimer) {
 		clearTimeout(flushTimer);
 		flushTimer = null;
+	}
+	if (inFlight) {
+		await inFlight;
 	}
 	flushStatsLedgerSync();
 }
