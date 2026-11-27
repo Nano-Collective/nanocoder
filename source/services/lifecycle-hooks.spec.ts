@@ -488,6 +488,37 @@ test.serial('large tool args preserve keys and let the hook decide', async t => 
 	);
 });
 
+test.serial('large write_file content lets the hook decide', async t => {
+	setProjectRoot(testDir);
+	withHooks({
+		'pre-tool-use': [
+			{
+				command: node(
+					"require('node:fs').writeFileSync(process.env.NANOCODER_CWD + '/hook-write-file-context.json', JSON.stringify({args:process.env.NANOCODER_TOOL_ARGS,truncated:process.env.NANOCODER_HOOK_CONTEXT_TRUNCATED}))",
+				),
+			},
+		],
+	});
+
+	const content = 'x'.repeat(20_000);
+	const outcome = await runLifecycleHooks('pre-tool-use', {
+		toolName: 'write_file',
+		toolArgs: {path: 'docs/large.md', content},
+	});
+	const hookContext = JSON.parse(
+		readFileSync(join(testDir, 'hook-write-file-context.json'), 'utf8'),
+	);
+	const args = JSON.parse(hookContext.args);
+
+	t.false(outcome.blocked);
+	t.is(hookContext.truncated, 'true');
+	t.true(hookContext.args.length <= maxHookEnvValueChars);
+	t.is(args.path, 'docs/large.md');
+	t.true(typeof args.content === 'string');
+	t.true(args.content.length > 0);
+	t.true(args.content.length < content.length);
+});
+
 test.serial(
 	'oversized numeric argument arrays preserve the bounded JSON shape',
 	async t => {
