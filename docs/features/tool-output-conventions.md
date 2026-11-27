@@ -41,7 +41,7 @@ When an edit tool returns file content:
 
 ## execute_bash
 
-`execute_bash` returns `EXIT_CODE`, then stderr and stdout, capped at 2000 characters. Long output keeps its head and its tail, since build and test tools print their summary at the end.
+`execute_bash` returns `EXIT_CODE`, then stderr and stdout, capped at 2000 characters. Each stream is bounded separately at 5 MB while it is being collected: a foreground command keeps the first 5 MB plus a rolling 256 KB tail, with an `N bytes omitted of M total` notice between them. The later 2000-character cut keeps its own head and tail, so it lands on the command's real ending and a build or test summary printed last still reaches the model. A timeout or cancellation flushes the collector too, so a flooded command that has to be killed still reports where it ended.
 
 ### Background jobs
 
@@ -59,7 +59,7 @@ STDOUT:
 
 - `bash_output` returns only the text produced since the previous read, so a chatty server does not resend its whole log. Its status line reports `running`, `exited with code N`, or how the job was stopped. The preview in the `execute_bash` result counts as the first read.
 - `kill_bash` stops the job's whole process group and waits for it to exit. Read any final output with `bash_output` before killing if you need it.
-- Background output goes through the same bounded collector as a normal command, so a job that floods stdout cannot grow memory without limit.
+- Background output uses the same 5 MB per-stream budget as a normal command, but keeps only the most recent window rather than a head and tail: a watcher is about what just happened, not its startup banner. The read cursors and any earlier `bash_output` reads move back as old text is trimmed, and a job that floods stdout cannot grow memory without limit.
 - Background jobs have no timeout and ignore the turn's cancellation: they are meant to outlive the turn that started them. They are stopped by `kill_bash`, when their session closes, or when Nanocoder exits.
 - Starting a background job goes through the same approval and sandbox path as a normal `execute_bash`. Plan mode hides `execute_bash`, `bash_output` and `kill_bash` together.
 
