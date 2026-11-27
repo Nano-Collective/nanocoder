@@ -52,8 +52,6 @@ export interface DiffEditBlock {
 }
 
 const SEARCH_MARKER = '<<<<<<< SEARCH';
-const SEPARATOR_MARKER = '=======';
-const REPLACE_MARKER = '>>>>>>> REPLACE';
 const DIFF_EDIT_CONTEXT_LINES = 3;
 const MAX_DIFF_EDIT_RESULT_CHARS = 4000;
 
@@ -84,6 +82,15 @@ function normalizeBlockContent(value: string): string {
 	return stripTrailingBoundaryNewline(stripSingleBoundaryNewline(value));
 }
 
+function findMarkerLine(
+	diff: string,
+	pattern: RegExp,
+	start: number,
+): RegExpExecArray | null {
+	pattern.lastIndex = start;
+	return pattern.exec(diff);
+}
+
 export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	if (!diff || diff.trim().length === 0) {
 		throw new Error(
@@ -95,35 +102,47 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	let index = 0;
 
 	while (index < diff.length) {
-		const searchStart = diff.indexOf(SEARCH_MARKER, index);
-		if (searchStart === -1) {
+		const searchMatch = findMarkerLine(
+			diff,
+			/^[ \t]*<<<<<<< SEARCH[ \t]*\r?$/gm,
+			index,
+		);
+		if (!searchMatch) {
 			if (diff.slice(index).trim().length > 0 && blocks.length === 0) {
 				throw new Error(`Missing ${SEARCH_MARKER} marker.`);
 			}
 			break;
 		}
 
-		const searchContentStart = searchStart + SEARCH_MARKER.length;
-		const separatorStart = diff.indexOf(SEPARATOR_MARKER, searchContentStart);
-		if (separatorStart === -1) {
+		const searchContentStart = searchMatch.index + searchMatch[0].length;
+		const separatorMatch = findMarkerLine(
+			diff,
+			/^[ \t]*=======[ \t]*\r?$/gm,
+			searchContentStart,
+		);
+		if (!separatorMatch) {
 			throw new Error(
 				`Diff block ${blocks.length + 1} is missing ======= separator.`,
 			);
 		}
 
-		const replaceContentStart = separatorStart + SEPARATOR_MARKER.length;
-		const replaceEnd = diff.indexOf(REPLACE_MARKER, replaceContentStart);
-		if (replaceEnd === -1) {
+		const replaceContentStart = separatorMatch.index + separatorMatch[0].length;
+		const replaceMatch = findMarkerLine(
+			diff,
+			/^[ \t]*>>>>>>> REPLACE[ \t]*\r?$/gm,
+			replaceContentStart,
+		);
+		if (!replaceMatch) {
 			throw new Error(
 				`Diff block ${blocks.length + 1} is missing >>>>>>> REPLACE marker.`,
 			);
 		}
 
 		const search = normalizeBlockContent(
-			diff.slice(searchContentStart, separatorStart),
+			diff.slice(searchContentStart, separatorMatch.index),
 		);
 		const replace = normalizeBlockContent(
-			diff.slice(replaceContentStart, replaceEnd),
+			diff.slice(replaceContentStart, replaceMatch.index),
 		);
 
 		if (search.length === 0) {
@@ -131,7 +150,7 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 		}
 
 		blocks.push({search, replace});
-		index = replaceEnd + REPLACE_MARKER.length;
+		index = replaceMatch.index + replaceMatch[0].length;
 	}
 
 	if (blocks.length === 0) {
