@@ -24,6 +24,12 @@ Welcome to Nanocoder! This section covers everything you need to install, config
 
 3. **Configure** a provider when prompted, or run `/settings providers` for the interactive wizard.
 
+### First-run provider detection
+
+On the first interactive setup, Nanocoder checks for local model servers on loopback ports 11434, 1234, and 8080. It also checks whether `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GROQ_API_KEY` is set in the launch environment.
+
+Apply the detected providers to the current project or your user config, or choose **Configure manually**. The generated config uses the local servers' reported model IDs and the provider templates' default hosted models. It saves environment-variable references for hosted keys. Keep those variables available whenever you launch a session that uses the saved config.
+
 ## CLI Options
 
 Nanocoder supports standard CLI arguments for quick information and help:
