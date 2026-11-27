@@ -1,11 +1,11 @@
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
+import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -119,60 +119,123 @@ const isWindows = process.platform === 'win32';
 
 (isWindows ? test.skip : test)(
 	'the prompt the model receives carries the stdin block and the cut note',
-	t => {
+	async t => {
 		const dir = mkdtempSync(join(tmpdir(), 'nanocoder-stdin-e2e-'));
+		const configDir = join(dir, 'cfg');
+		mkdirSync(configDir);
+		const requests: Array<{
+			path: string | undefined;
+			messages?: Array<{role?: string; content?: string}>;
+		}> = [];
+		const server = createServer((req, res) => {
+			let raw = '';
+			req.on('data', chunk => {
+				raw += chunk;
+			});
+			req.on('end', () => {
+				if (req.method !== 'POST') {
+					res.writeHead(200).end('{}');
+					return;
+				}
+				requests.push({
+					path: req.url,
+					...JSON.parse(raw),
+				});
+				res.writeHead(200, {'Content-Type': 'text/event-stream'});
+				const base = {
+					id: 'stdin-test',
+					object: 'chat.completion.chunk',
+					created: 0,
+					model: 'm',
+				};
+				res.write(
+					`data: ${JSON.stringify({...base, choices: [{index: 0, delta: {role: 'assistant', content: 'ok'}, finish_reason: null}]})}\n\n`,
+				);
+				res.write(
+					`data: ${JSON.stringify({...base, choices: [{index: 0, delta: {}, finish_reason: 'stop'}]})}\n\n`,
+				);
+				res.end('data: [DONE]\n\n');
+			});
+		});
 		try {
-			const configDir = join(dir, 'cfg');
-			mkdirSync(configDir);
-			const capture = join(dir, 'captured.txt');
+			await new Promise<void>((resolve, reject) => {
+				server.once('error', reject);
+				server.listen(0, '127.0.0.1', resolve);
+			});
+			const address = server.address();
+			if (!address || typeof address === 'string') {
+				throw new Error('The mock model server did not bind to a TCP port');
+			}
 			writeFileSync(
 				join(configDir, 'agents.config.json'),
 				JSON.stringify({
 					nanocoder: {
 						hooks: {
-							'user-prompt-submit': [
-								{command: `printf '%s' "$NANOCODER_PROMPT" > ${capture}`},
-							],
+							'user-prompt-submit': [{command: 'true'}],
 						},
 					},
 				}),
 			);
 
-			// A provider has to exist for the run to get as far as submitting the
-			// prompt. This one cannot be reached, so the run fails right after the
-			// hook has seen the prompt - which is all this test needs.
-			const result = spawnSync(
-				process.execPath,
-				[
-					'--import=tsx',
-					cliPath,
-					'--trust-directory',
-					'--plain',
-					'run',
-					'summarize the log',
-				],
-				{
-					encoding: 'utf8',
-					timeout: 60_000,
-					input: 'x'.repeat(150_000),
-					env: {
-						...process.env,
-						NANOCODER_CONFIG_DIR: configDir,
-						NANOCODER_PROVIDERS: JSON.stringify([
-							{
-								name: 'unreachable',
-								baseUrl: 'http://127.0.0.1:1/v1',
-								apiKey: 'k',
-								models: ['m'],
+			const result = await new Promise<{status: number | null; stderr: string}>(
+				(resolve, reject) => {
+					const child = spawn(
+						process.execPath,
+						[
+							'--import=tsx',
+							cliPath,
+							'--trust-directory',
+							'--plain',
+							'run',
+							'summarize the log',
+						],
+						{
+							stdio: ['pipe', 'ignore', 'pipe'],
+							timeout: 60_000,
+							env: {
+								...process.env,
+								NANOCODER_CONFIG_DIR: configDir,
+								NANOCODER_PROVIDERS: JSON.stringify([
+									{
+										name: 'local',
+										baseUrl: `http://127.0.0.1:${address.port}/v1`,
+										apiKey: 'k',
+										models: ['m'],
+									},
+								]),
+								NODE_DISABLE_COMPILE_CACHE: '1',
+								TSX_DISABLE_CACHE: '1',
 							},
-						]),
-						NODE_DISABLE_COMPILE_CACHE: '1',
-						TSX_DISABLE_CACHE: '1',
-					},
+						},
+					);
+					let stderr = '';
+					child.stderr.setEncoding('utf8');
+					child.stderr.on('data', chunk => {
+						stderr += chunk;
+					});
+					child.once('error', reject);
+					child.once('close', status => resolve({status, stderr}));
+					child.stdin.on('error', error => {
+						// The CLI intentionally stops reading after the stdin cap, so
+						// a larger test payload can close the pipe before this write ends.
+						if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
+							reject(error);
+						}
+					});
+					child.stdin.end('x'.repeat(150_000));
 				},
 			);
-
-			const prompt = readFileSync(capture, 'utf8');
+			t.is(result.status, 0, result.stderr);
+			t.is(requests.length, 1, result.stderr);
+			t.is(requests[0]?.path, '/v1/chat/completions');
+			const prompt = requests[0]?.messages?.find(
+				message =>
+					message.role === 'user' &&
+					typeof message.content === 'string' &&
+					message.content.includes('<stdin>'),
+			)?.content;
+			t.truthy(prompt, 'the user prompt reaches the local provider');
+			if (!prompt) return;
 			t.true(
 				prompt.startsWith('summarize the log'),
 				`prompt did not start with the positional prompt: ${prompt.slice(0, 80)}`,
@@ -190,6 +253,7 @@ const isWindows = process.platform === 'win32';
 			const body = prompt.slice(start, prompt.indexOf('\n\n[stdin truncated'));
 			t.is(body.length, 100_000, result.stderr);
 		} finally {
+			await new Promise<void>(resolve => server.close(() => resolve()));
 			rmSync(dir, {recursive: true, force: true});
 		}
 	},
