@@ -225,10 +225,6 @@ export function hasFileSnapshot(absPath: string): boolean {
 }
 
 /** Forget a stale snapshot so a changed or deleted file can be read anew. */
-export function forgetFileSnapshot(absPath: string): void {
-	getReadContentScope().fileSnapshots.delete(resolve(absPath));
-}
-
 /** Forget all read evidence for a path after a filesystem operation replaces it. */
 export function forgetFileState(absPath: string): void {
 	const path = resolve(absPath);
