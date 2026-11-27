@@ -35,6 +35,9 @@ export interface Session {
 	/** Set by a client that still references this session. Retention (age and
 	 * count limits) leaves it alone; an explicit delete still removes it. */
 	pinned?: boolean;
+	/** Session this one was forked from, if any. Survives the parent being
+	 * deleted so the history list can still say where the fork came from. */
+	parentId?: string;
 }
 
 export interface SessionMetadata {
@@ -49,6 +52,7 @@ export interface SessionMetadata {
 	titleManuallySet?: boolean;
 	titleGenerated?: boolean;
 	pinned?: boolean;
+	parentId?: string;
 }
 
 /**
@@ -160,6 +164,7 @@ function toSessionMetadata(session: Session): SessionMetadata {
 		titleManuallySet: session.titleManuallySet,
 		titleGenerated: session.titleGenerated,
 		pinned: session.pinned,
+		parentId: session.parentId,
 	};
 }
 
@@ -228,8 +233,8 @@ export class SessionManager {
 			const sessions = await this.readIndex();
 			// Autosave recreates the live session under its own id when the file
 			// cannot be read. The index entry is then all that is left of the
-			// pin, the creation time and a title the user or the titler chose,
-			// so keep them instead of resetting them.
+			// pin, the creation time, a title the user or the titler chose and
+			// the fork's parent, so keep them instead of resetting them.
 			// A value the caller passes still wins.
 			const existing = sessions.find(s => s.id === sessionId);
 			const keepExistingTitle =
@@ -255,6 +260,7 @@ export class SessionManager {
 					? existing.titleGenerated
 					: sessionData.titleGenerated,
 				pinned: sessionData.pinned ?? existing?.pinned,
+				parentId: sessionData.parentId ?? existing?.parentId,
 			};
 
 			await this.writeSessionLocked(created, sessions);
@@ -569,6 +575,40 @@ export class SessionManager {
 
 		await this.saveSession(updatedSession);
 		return updatedSession;
+	}
+
+	/**
+	 * Copy a session's conversation into a new session that can diverge from
+	 * the original. The original is left untouched and stays in /resume; the
+	 * fork records `parentId` so the history list can show where it came from.
+	 *
+	 * The copied title is marked manually set: autosave derives titles from the
+	 * first user message, which the fork shares with its parent, so without the
+	 * flag the "(fork)" suffix would be overwritten on the next save.
+	 */
+	async forkSession(
+		sessionId: string,
+		options: {title?: string} = {},
+	): Promise<Session | null> {
+		const source = await this.readSession(sessionId);
+		if (!source) return null;
+
+		const requestedTitle = options.title?.trim();
+		const title = requestedTitle || `${source.title} (fork)`;
+
+		return this.createSession({
+			title:
+				title.length > MAX_SESSION_NAME_LENGTH
+					? title.slice(0, MAX_SESSION_NAME_LENGTH)
+					: title,
+			messageCount: source.messages.length,
+			provider: source.provider,
+			model: source.model,
+			workingDirectory: source.workingDirectory,
+			messages: structuredClone(source.messages),
+			titleManuallySet: true,
+			parentId: source.id,
+		});
 	}
 
 	async deleteSession(sessionId: string): Promise<void> {
