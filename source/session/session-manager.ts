@@ -14,6 +14,7 @@ import {
 	isValidSessionMetadata,
 } from '@/session/session-validation';
 import type {Message} from '@/types/core';
+import {atomicWriteFile} from '@/utils/fs/atomic-write';
 import {withExclusiveLock} from '@/utils/fs/exclusive-file-lock';
 
 export interface Session {
@@ -49,98 +50,6 @@ export interface SessionMetadata {
 	titleManuallySet?: boolean;
 	titleGenerated?: boolean;
 	pinned?: boolean;
-}
-
-/**
- * Rename budget for transient sharing violations: one initial attempt plus five
- * retries. Windows refuses to replace a file another process has open, and the
- * holder — usually the index reader in a second Nanocoder process — normally
- * lets go within milliseconds, so a short bounded wait beats failing the save.
- */
-const RENAME_MAX_RETRIES = 5;
-const RENAME_BASE_DELAY_MS = 10;
-const RENAME_MAX_DELAY_MS = 160;
-const RENAME_JITTER_MS = 10;
-const RETRYABLE_RENAME_CODES: ReadonlySet<string> = new Set([
-	'EPERM',
-	'EBUSY',
-	'EACCES',
-]);
-
-type RenameFn = (from: string, to: string) => Promise<void>;
-
-const defaultRename: RenameFn = (from, to) => fs.rename(from, to);
-
-let renameImpl: RenameFn = defaultRename;
-
-/**
- * Test seam: replace the rename primitive so the retry path can be exercised
- * deterministically. Call with no arguments to restore the default.
- * @internal
- */
-export function setRenameForTests(impl?: RenameFn): void {
-	renameImpl = impl ?? defaultRename;
-}
-
-function isRetryableRenameError(error: unknown): boolean {
-	const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
-	return typeof code === 'string' && RETRYABLE_RENAME_CODES.has(code);
-}
-
-/** Exponential backoff with jitter, so concurrent writers don't retry in step. */
-function renameBackoffMs(attempt: number): number {
-	const base = Math.min(
-		RENAME_BASE_DELAY_MS * 2 ** attempt,
-		RENAME_MAX_DELAY_MS,
-	);
-	return base + Math.floor(Math.random() * RENAME_JITTER_MS);
-}
-
-/**
- * Rename `from` onto `to`, retrying a bounded number of times when the
- * filesystem reports a transient sharing violation.
- *
- * POSIX never blocks a rename because a file is open, so this only fires on
- * Windows (and on network mounts that return EBUSY). Platform is deliberately
- * not checked: a genuine permission error costs one bounded backoff
- * (~360 ms) before the original error is rethrown unchanged, and gating on
- * `process.platform` would make the retry path untestable on Linux CI.
- */
-async function renameWithRetry(from: string, to: string): Promise<void> {
-	for (let attempt = 0; ; attempt++) {
-		try {
-			await renameImpl(from, to);
-			return;
-		} catch (error) {
-			if (attempt >= RENAME_MAX_RETRIES || !isRetryableRenameError(error)) {
-				throw error;
-			}
-			await new Promise<void>(resolve => {
-				setTimeout(resolve, renameBackoffMs(attempt));
-			});
-		}
-	}
-}
-
-/** Write data to a temp file then atomically rename into place. */
-async function atomicWriteFile(
-	filePath: string,
-	data: string,
-	mode: number,
-): Promise<void> {
-	const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
-	try {
-		await fs.writeFile(tmpPath, data, {mode});
-		await renameWithRetry(tmpPath, filePath);
-	} catch (error) {
-		// Clean up temp file on failure
-		try {
-			await fs.unlink(tmpPath);
-		} catch (_cleanupError) {
-			// Ignore cleanup errors
-		}
-		throw error;
-	}
 }
 
 function isEnoent(error: unknown): boolean {
@@ -285,11 +194,9 @@ export class SessionManager {
 		const sessionFilePath = path.join(this.sessionsDir, `${session.id}.json`);
 
 		// Write session file atomically
-		await atomicWriteFile(
-			sessionFilePath,
-			JSON.stringify(session, null, 2),
-			0o600,
-		);
+		await atomicWriteFile(sessionFilePath, JSON.stringify(session, null, 2), {
+			mode: 0o600,
+		});
 
 		// Update index
 		const existingSessionIndex = sessions.findIndex(s => s.id === session.id);
@@ -305,7 +212,7 @@ export class SessionManager {
 		await atomicWriteFile(
 			this.sessionsIndexPath,
 			JSON.stringify(sessions, null, 2),
-			0o600,
+			{mode: 0o600},
 		);
 	}
 
@@ -358,7 +265,7 @@ export class SessionManager {
 				await atomicWriteFile(
 					this.sessionsIndexPath,
 					JSON.stringify(metadata, null, 2),
-					0o600,
+					{mode: 0o600},
 				);
 			}
 
@@ -407,7 +314,7 @@ export class SessionManager {
 		await atomicWriteFile(
 			this.sessionsIndexPath,
 			JSON.stringify([...kept, ...recovered], null, 2),
-			0o600,
+			{mode: 0o600},
 		);
 	}
 
@@ -594,7 +501,7 @@ export class SessionManager {
 			await atomicWriteFile(
 				this.sessionsIndexPath,
 				JSON.stringify(filteredSessions, null, 2),
-				0o600,
+				{mode: 0o600},
 			);
 		});
 
@@ -669,7 +576,7 @@ export class SessionManager {
 			await atomicWriteFile(
 				this.sessionsIndexPath,
 				JSON.stringify(remaining, null, 2),
-				0o600,
+				{mode: 0o600},
 			);
 
 			// Then delete files — only ignore ENOENT
@@ -710,7 +617,7 @@ export class SessionManager {
 			await atomicWriteFile(
 				this.sessionsIndexPath,
 				JSON.stringify(remaining, null, 2),
-				0o600,
+				{mode: 0o600},
 			);
 
 			// Then delete files — only ignore ENOENT
