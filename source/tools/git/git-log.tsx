@@ -30,6 +30,21 @@ interface GitLogInput {
 // Execution
 // ============================================================================
 
+const DEFAULT_GIT_LOG_COUNT = 10;
+const MAX_GIT_LOG_COUNT = 50;
+
+/**
+ * Turns `count` into a whole number between 1 and MAX_GIT_LOG_COUNT.
+ * Anything that is not a positive number falls back to the default, since
+ * `git log -n -1` (or any negative value) means "no limit" to git.
+ */
+const normalizeGitLogCount = (value: unknown): number => {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+		return DEFAULT_GIT_LOG_COUNT;
+	}
+	return Math.min(MAX_GIT_LOG_COUNT, Math.max(1, Math.trunc(value)));
+};
+
 const executeGitLog = async (args: GitLogInput): Promise<string> => {
 	try {
 		// The branch is passed to git as a positional argument, so a value
@@ -38,7 +53,7 @@ const executeGitLog = async (args: GitLogInput): Promise<string> => {
 			return `Error: Invalid branch name: ${args.branch}`;
 		}
 
-		const count = Math.min(args.count || 10, 50); // Cap at 50
+		const count = normalizeGitLogCount(args.count);
 		const branch = args.branch || (await getCurrentBranch());
 
 		const commits = await getCommits({
@@ -93,6 +108,7 @@ const gitLogCoreTool = tool({
 		properties: {
 			count: {
 				type: 'number',
+				minimum: 1,
 				description: 'Number of commits to show (default: 10, max: 50)',
 			},
 			file: {

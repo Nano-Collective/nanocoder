@@ -322,3 +322,86 @@ test.serial(
 		}
 	},
 );
+
+// One repo with more commits than the 50 commit cap, shared by the count tests.
+// fast-import writes all commits in a single git call, which keeps this quick.
+let manyCommitsRepo: string | undefined;
+
+function getManyCommitsRepo(): string {
+	if (manyCommitsRepo) return manyCommitsRepo;
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-git-log-test-'));
+	git(dir, 'init', '-q', '-b', 'main');
+	let stream = '';
+	for (let i = 1; i <= 55; i++) {
+		const message = `commit ${i}`;
+		stream += `commit refs/heads/main
+committer Test <test@example.com> ${1700000000 + i} +0000
+data ${message.length}
+${message}
+
+`;
+	}
+	execFileSync('git', ['fast-import', '--quiet'], {
+		cwd: dir,
+		input: stream,
+		stdio: ['pipe', 'pipe', 'pipe'],
+	});
+	manyCommitsRepo = dir;
+	return dir;
+}
+
+test.after.always(() => {
+	if (manyCommitsRepo) {
+		rmSync(manyCommitsRepo, {recursive: true, force: true});
+	}
+});
+
+async function runInRepoWithManyCommits(args: GitLogArgs): Promise<string> {
+	const dir = getManyCommitsRepo();
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(dir);
+		return await executeGitLog(args);
+	} finally {
+		process.chdir(originalCwd);
+	}
+}
+
+test.serial('git_log caps a large count at 50 commits', async t => {
+	const result = await runInRepoWithManyCommits({count: 100});
+
+	t.regex(result, /^Showing 50 commit\(s\) on main:/);
+});
+
+test.serial(
+	'git_log uses the default for a negative count instead of the whole history',
+	async t => {
+		const result = await runInRepoWithManyCommits({count: -1});
+
+		t.regex(result, /^Showing 10 commit\(s\) on main:/);
+	},
+);
+
+test.serial('git_log uses the default for a count of zero', async t => {
+	const result = await runInRepoWithManyCommits({count: 0});
+
+	t.regex(result, /^Showing 10 commit\(s\) on main:/);
+});
+
+test.serial('git_log rounds a fractional count down', async t => {
+	const result = await runInRepoWithManyCommits({count: 2.7});
+
+	t.regex(result, /^Showing 2 commit\(s\) on main:/);
+});
+
+test.serial('git_log shows at least one commit for a count below 1', async t => {
+	const result = await runInRepoWithManyCommits({count: 0.5});
+
+	t.regex(result, /^Showing 1 commit\(s\) on main:/);
+});
+
+test('git_log input schema requires a count of at least 1', t => {
+	// biome-ignore lint/suspicious/noExplicitAny: Test accessing internal tool structure
+	const schema = (gitLogTool.tool as any).inputSchema.jsonSchema;
+	t.is(schema.properties.count.minimum, 1);
+});
