@@ -73,7 +73,7 @@ interface MentionWarning {
 export type ComposerHandle = {
 	/** Leaves reverse search, or clears the typed text undoably. False if empty. */
 	clearDraft: () => boolean;
-	/** No typed text. */
+	/** No typed text and no image attachments. */
 	isEmpty: () => boolean;
 };
 
@@ -524,7 +524,9 @@ export default function UserInput({
 			setShowClearMessage(false);
 			return true;
 		},
-		isEmpty: () => !currentStateRef.current.displayValue,
+		// An image-only draft is not empty: Ctrl+D must not exit and lose it.
+		isEmpty: () =>
+			!currentStateRef.current.displayValue && attachments.length === 0,
 	}));
 
 	// Handle escape key logic

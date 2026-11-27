@@ -129,7 +129,7 @@ Pressing Esc before the model has produced any output, and before any tool has s
 | Action | Shortcut |
 |--------|----------|
 | Exit Nanocoder | Ctrl+C twice |
-| Exit straight away | Ctrl+D (empty prompt) or `/exit` |
+| Exit straight away | Ctrl+D (empty prompt, no attachments) or `/exit` |
 
 Ctrl+C never ends the session by accident. While a response is running it cancels it, even while a tool approval or a question is waiting (Esc there only declines), and with text in the prompt it clears it. Otherwise it shows `Press Ctrl+C again to exit`, and a second press within 2 seconds exits. Any other key in between resets this. If a cancel is already under way, the next Ctrl+C goes straight to the exit hint, so a response that won't stop can't keep you from exiting.
 
