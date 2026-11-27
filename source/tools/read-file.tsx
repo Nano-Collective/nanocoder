@@ -19,6 +19,15 @@ import {
 } from '@/input/clipboard-image';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {
+	formatNotebookRead,
+	getNotebookRevision,
+	isNotebookPath,
+	type NotebookRange,
+	parseNotebook,
+	readNotebookText,
+	validateNotebookRange,
+} from '@/tools/file-ops/notebook';
+import {
 	markFileSeen,
 	matchReadContent,
 	READ_STUB_MARKER,
@@ -37,12 +46,35 @@ function formatReadStub(path: string, lineCount: number, size: number): string {
 	return `[file: ${path} — ${READ_STUB_MARKER} (${lineCount} lines, ${size} bytes). pass start_line/end_line to read the body again.]`;
 }
 
-const executeReadFile = async (args: {
+interface ReadFileArgs extends NotebookRange {
 	path: string;
 	start_line?: number;
 	end_line?: number;
 	metadata_only?: boolean;
-}): Promise<string | VisualToolOutput> => {
+}
+
+function validateNotebookReadArgs(args: ReadFileArgs): boolean {
+	const notebook = isNotebookPath(args.path);
+	if (notebook) {
+		if (args.start_line !== undefined || args.end_line !== undefined) {
+			throw new Error('Use start_cell and end_cell to read a notebook range.');
+		}
+		validateNotebookRange(args);
+	} else if (
+		args.start_cell !== undefined ||
+		args.end_cell !== undefined ||
+		args.source_offset !== undefined
+	) {
+		throw new Error(
+			'Cell range arguments are only supported for .ipynb notebooks.',
+		);
+	}
+	return notebook;
+}
+
+const executeReadFile = async (
+	args: ReadFileArgs,
+): Promise<string | VisualToolOutput> => {
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 
 	try {
@@ -108,6 +140,18 @@ const executeReadFile = async (args: {
 
 			output += `\n[Use read_file to view file contents]\n`;
 
+			return output;
+		}
+
+		if (validateNotebookReadArgs(args)) {
+			resolveFilePath(args.path, getSafeSessionCwd(), getProjectRoot());
+			const content = await readNotebookText(absPath);
+			const output = formatNotebookRead(
+				await parseNotebook(content),
+				getNotebookRevision(content),
+				args,
+			);
+			markFileSeen(absPath);
 			return output;
 		}
 
@@ -225,13 +269,8 @@ const executeReadFile = async (args: {
 
 const readFileCoreTool = tool({
 	description:
-		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again. Image files (png, jpg, jpeg, gif, webp, up to 10 MB) are returned as images that a vision-capable model can see.',
-	inputSchema: jsonSchema<{
-		path: string;
-		start_line?: number;
-		end_line?: number;
-		metadata_only?: boolean;
-	}>({
+		'Read file contents. Use this INSTEAD OF bash cat/head/tail/less commands. PROGRESSIVE DISCLOSURE: Files ≤1500 lines return content directly. Larger files return a 250-line preview with a continuation hint - use start_line/end_line to read additional sections. Use metadata_only=true for file info (size, lines, type) without reading content. Repeating the same path and line range while the file is unchanged returns a short stub; pass start_line/end_line to read the body again. Image files (png, jpg, jpeg, gif, webp, up to 10 MB) are returned as images that a vision-capable model can see. Jupyter .ipynb files return a page of cells with source, saved output summaries and the revision for edit_notebook. Use start_cell/end_cell for notebook ranges.',
+	inputSchema: jsonSchema<ReadFileArgs>({
 		type: 'object',
 		properties: {
 			path: {
@@ -248,6 +287,20 @@ const readFileCoreTool = tool({
 				description:
 					'Optional: Line number to stop reading at (inclusive). Use with start_line to read a specific range or continue a large-file preview.',
 			},
+			start_cell: {
+				type: 'integer',
+				description: 'First notebook cell to read (zero-based).',
+			},
+			end_cell: {
+				type: 'integer',
+				description:
+					'Last notebook cell to read (zero-based, inclusive). Results may be paginated.',
+			},
+			source_offset: {
+				type: 'integer',
+				description:
+					'Continue long cell source at the provided UTF-16 offset. Set start_cell and end_cell to the same cell.',
+			},
 			metadata_only: {
 				type: 'boolean',
 				description:
@@ -257,12 +310,7 @@ const readFileCoreTool = tool({
 		required: ['path'],
 	}),
 	execute: async (
-		args: {
-			path: string;
-			start_line?: number;
-			end_line?: number;
-			metadata_only?: boolean;
-		},
+		args: ReadFileArgs,
 		_options: {toolCallId: string; messages: unknown[]},
 	) => {
 		return await executeReadFile(args);
@@ -380,6 +428,16 @@ const readFileFormatter = async (
 	const isMetadataOnly = Boolean(args.metadata_only);
 
 	const requestedPath = args.path || args.file_path;
+	if (!isMetadataOnly && requestedPath && isNotebookPath(requestedPath)) {
+		return (
+			<ToolMessage
+				title="read_file"
+				message={[requestedPath, result?.split('\n', 1)[0]]
+					.filter(Boolean)
+					.join('\n')}
+			/>
+		);
+	}
 	// An image read returns pixels, not lines, so there is no line range or
 	// token count to show (and decoding the bytes as text would be wrong).
 	const isImage =
@@ -435,12 +493,9 @@ const readFileFormatter = async (
 	return <ReadFileFormatter args={args} fileInfo={fileInfo} />;
 };
 
-const readFileValidator = async (args: {
-	path: string;
-	start_line?: number;
-	end_line?: number;
-	metadata_only?: boolean;
-}): Promise<{valid: true} | {valid: false; error: string}> => {
+const readFileValidator = async (
+	args: ReadFileArgs,
+): Promise<{valid: true} | {valid: false; error: string}> => {
 	// Validate path boundary first to prevent directory traversal
 	const cwd = getSafeSessionCwd();
 	const root = getProjectRoot();
@@ -466,6 +521,9 @@ const readFileValidator = async (args: {
 
 	try {
 		await access(absPath, constants.F_OK);
+		if (!args.metadata_only && validateNotebookReadArgs(args)) {
+			return {valid: true};
+		}
 
 		// Images are read as bytes, not text, so the line and minified-content
 		// checks below do not apply. Only the size cap does.

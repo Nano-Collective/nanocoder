@@ -13,6 +13,7 @@ const TOOL_PROFILES: Record<ConcreteProfile, string[]> = {
 		'read_file',
 		'write_file',
 		'string_replace',
+		'edit_notebook',
 		'execute_bash',
 		'bash_output',
 		'kill_bash',
@@ -24,6 +25,7 @@ const TOOL_PROFILES: Record<ConcreteProfile, string[]> = {
 	nano: [
 		'read_file',
 		'diff_edit',
+		'edit_notebook',
 		'write_file',
 		'execute_bash',
 		'bash_output',
@@ -37,15 +39,15 @@ export const TOOL_PROFILE_DESCRIPTIONS: Record<ToolProfile, string> = {
 	full: 'All tools including MCP',
 	minimal:
 		'Core editing, bash, and exploration tools — slim prompt, single-tool mode enabled automatically',
-	nano: 'Strictest budget — 7 tools, diff-block editing, ultra-slim prompt. For low-end hardware running tiny models.',
+	nano: 'Strictest budget — 8 tools, diff-block editing, ultra-slim prompt. For low-end hardware running tiny models.',
 };
 
 export const TOOL_PROFILE_TOOLTIPS: Record<ToolProfile, string> = {
 	auto: 'Resolves from the model size: tiny models get nano, small models get minimal, larger/cloud models get full. Switching models re-resolves automatically.',
 	full: 'No filtering. All registered tools including MCP servers.',
 	minimal:
-		'10 core tools (edit, bash, background bash jobs, search, agent) with slim prompt and single-tool enforcement. Recommended for small models.',
-	nano: '7 tools (read, diff edit, write, bash, bash output, kill bash, search) with an ultra-slim prompt and single-tool enforcement. AGENTS.md is omitted from the system prompt by default. Recommended for tiny models or low-end hardware.',
+		'11 core tools (edit, bash, background bash jobs, search, agent) with slim prompt and single-tool enforcement. Recommended for small models.',
+	nano: '8 tools (read, diff edit, notebook edit, write, bash, bash output, kill bash, search) with an ultra-slim prompt and single-tool enforcement. AGENTS.md is omitted from the system prompt by default. Recommended for tiny models or low-end hardware.',
 };
 
 /**

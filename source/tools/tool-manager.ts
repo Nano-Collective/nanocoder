@@ -50,6 +50,7 @@ const MODE_EXCLUDED_TOOLS: Record<DevelopmentMode, string[]> = {
 		'write_file',
 		'string_replace',
 		'diff_edit',
+		'edit_notebook',
 		'file_op',
 		'lsp_format_document',
 		'execute_bash',

@@ -4,6 +4,7 @@ import {formatError} from '@/utils/error-formatter';
 import {isDerivedContentPath} from '@/utils/fs/derived-content';
 import type {CachedFile} from '@/utils/fs/file-cache';
 import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
+import {isNotebookPath} from './notebook';
 
 type ValidationResult = {valid: true} | {valid: false; error: string};
 
@@ -79,6 +80,12 @@ export function validatePath(path: string): ValidationResult {
  * path that has never been read.
  */
 export function validateEditableFormat(path: string): ValidationResult {
+	if (isNotebookPath(path)) {
+		return {
+			valid: false,
+			error: `Cannot edit "${path}" as plain text. Use read_file and edit_notebook to make cell edits in an existing .ipynb notebook.`,
+		};
+	}
 	if (!isDerivedContentPath(path)) return {valid: true};
 
 	return {

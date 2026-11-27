@@ -25,6 +25,12 @@ Reading the same path and line range again while the file is unchanged (same mod
 
 A symlink is compared by its target, so editing the target file makes the next read return the content again. The stub is only returned while the earlier body is still in the conversation the model sees: compaction, the message cap dropping that read, `/resume`, `/tune`, the config wizard, and in ACP `/clear`, a retry, a timeline revert or loading a chat from disk all reset it. Subagents keep their own record.
 
+### Jupyter notebooks
+
+`read_file` shows a page of notebook cells with zero-based indexes, cell types, source, and short saved output summaries. Use `start_cell` and `end_cell` for an inclusive cell range and follow the continuation hint for long cell source. Rich output is summarized by type and size.
+
+`edit_notebook` takes the revision returned by `read_file` and edits one cell in an existing nbformat 4 notebook. It supports replacing source, inserting or deleting a cell, and changing its type. The approval preview focuses on the affected cell and flags removed outputs or attachments. Replacing source preserves saved outputs from the last execution. The plain-text editors direct notebook edits to `edit_notebook`.
+
 ## Edit tools
 
 Bounded edit-tool responses, such as `string_replace` and `diff_edit`, return partial file windows. Those responses should keep line numbers because the excerpt needs to be placed inside the larger file.
