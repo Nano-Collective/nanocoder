@@ -1,4 +1,4 @@
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -99,6 +99,35 @@ test.serial('returns not-found for an id that does not exist', async t => {
 
 	t.false(result.ok);
 	if (!result.ok) t.is(result.reason, 'not-found');
+});
+
+test.serial('reports an unreadable session file when the index still has the id', async t => {
+	const session = await createSession(CWD_A, 'corrupt');
+	const filePath = join(manager.getSessionDirectory(), `${session.id}.json`);
+	await writeFile(filePath, '{"truncated":');
+
+	const result = await resolveSession(session.id, CWD_A, {manager});
+
+	t.false(result.ok);
+	if (!result.ok) {
+		t.is(result.reason, 'corrupt');
+		t.regex(result.message, /Session file is unreadable/);
+		t.true(result.message.includes(filePath));
+	}
+});
+
+test.serial('reports a corrupt newest session when resolving "last"', async t => {
+	const session = await createSession(CWD_A, 'corrupt-last');
+	const filePath = join(manager.getSessionDirectory(), `${session.id}.json`);
+	await writeFile(filePath, '{"truncated":');
+
+	const result = await resolveSession('last', CWD_A, {manager});
+
+	t.false(result.ok);
+	if (!result.ok) {
+		t.is(result.reason, 'corrupt');
+		t.true(result.message.includes(filePath));
+	}
 });
 
 test.serial('returns not-found for an out-of-range index', async t => {

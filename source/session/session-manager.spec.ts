@@ -1,4 +1,4 @@
-import {
+import fs, {
 	mkdir,
 	mkdtemp,
 	open,
@@ -12,6 +12,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {mock} from 'node:test';
 import {ArtifactManager} from '@/artifacts/artifact-manager';
 import {reloadAppConfig} from '@/config/index';
 import {SessionManager, setRenameForTests} from './session-manager.js';
@@ -275,6 +276,119 @@ test.serial('readSession returns null for non-existent session', async t => {
 	t.is(result, null);
 });
 
+test.serial('readSessionResult distinguishes corrupt files from missing ones', async t => {
+	const session = await manager.createSession({
+		title: 'Corrupt test',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const filePath = join(sessionsDir, `${session.id}.json`);
+	await writeFile(filePath, '{"truncated":');
+
+	const corrupt = await manager.readSessionResult(session.id);
+	t.false(corrupt.ok);
+	if (!corrupt.ok) {
+		t.is(corrupt.reason, 'corrupt');
+		t.is(corrupt.filePath, filePath);
+	}
+
+	const missing = await manager.readSessionResult(
+		'00000000-0000-0000-0000-000000000000',
+	);
+	t.false(missing.ok);
+	if (!missing.ok) t.is(missing.reason, 'missing');
+});
+
+test.serial('readSessionResult reports a read error as unreadable, not corrupt', async t => {
+	const session = await manager.createSession({
+		title: 'Unreadable test',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const filePath = join(sessionsDir, `${session.id}.json`);
+	const originalReadFile = fs.readFile;
+
+	// A permission/sharing failure is transient: the bytes on disk may still be
+	// perfectly valid, so it must not be labelled corrupt.
+	mock.method(
+		fs,
+		'readFile',
+		(async (...args: Parameters<typeof fs.readFile>) => {
+			if (args[0] === filePath) {
+				throw Object.assign(new Error('EACCES: permission denied'), {
+					code: 'EACCES',
+				});
+			}
+			return originalReadFile(...args);
+		}) as typeof fs.readFile,
+	);
+	try {
+		const result = await manager.readSessionResult(session.id);
+		t.false(result.ok);
+		if (!result.ok) {
+			t.is(result.reason, 'unreadable');
+			t.is(result.filePath, filePath);
+		}
+	} finally {
+		mock.restoreAll();
+	}
+});
+
+test.serial('quarantineCorruptSession preserves the corrupt bytes', async t => {
+	const session = await manager.createSession({
+		title: 'Backup test',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const filePath = join(sessionsDir, `${session.id}.json`);
+	const corruptContents = '{"truncated":';
+	await writeFile(filePath, corruptContents);
+
+	const backupPath = await manager.quarantineCorruptSession(session.id);
+
+	t.is(backupPath, `${filePath}.corrupt`);
+	if (backupPath) t.is(await readFile(backupPath, 'utf-8'), corruptContents);
+	const after = await manager.readSessionResult(session.id);
+	t.false(after.ok);
+	if (!after.ok) t.is(after.reason, 'missing');
+});
+
+test.serial('quarantineCorruptSession never overwrites an earlier backup', async t => {
+	const session = await manager.createSession({
+		title: 'Second backup test',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const filePath = join(sessionsDir, `${session.id}.json`);
+
+	await writeFile(filePath, 'first corruption');
+	const firstBackup = await manager.quarantineCorruptSession(session.id);
+	await writeFile(filePath, 'second corruption');
+	const secondBackup = await manager.quarantineCorruptSession(session.id);
+
+	t.truthy(firstBackup);
+	t.truthy(secondBackup);
+	if (firstBackup) {
+		t.is(await readFile(firstBackup, 'utf-8'), 'first corruption');
+	}
+	if (secondBackup) {
+		t.not(secondBackup, firstBackup);
+		t.is(await readFile(secondBackup, 'utf-8'), 'second corruption');
+	}
+});
+
 // --- loadSession ---
 
 test.serial(
@@ -304,6 +418,25 @@ test.serial(
 test.serial('loadSession returns null for invalid ID', async t => {
 	const result = await manager.loadSession('../../../etc/passwd');
 	t.is(result, null);
+});
+
+test.serial('loadSession reports null for a corrupt file without rewriting it', async t => {
+	const session = await manager.createSession({
+		title: 'Load corrupt test',
+		messageCount: 1,
+		provider: 'test',
+		model: 'test',
+		workingDirectory: '/tmp',
+		messages: [{role: 'user', content: 'hi'}],
+	});
+	const filePath = join(sessionsDir, `${session.id}.json`);
+	const corruptContents = '{"truncated":';
+	await writeFile(filePath, corruptContents);
+
+	const loaded = await manager.loadSession(session.id);
+
+	t.is(loaded, null);
+	t.is(await readFile(filePath, 'utf-8'), corruptContents);
 });
 
 // --- saveSession (update existing) ---

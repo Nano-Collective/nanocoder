@@ -30,8 +30,11 @@ import {
 	drainPendingHookContext,
 } from '@/services/lifecycle-hooks';
 import {resetPreferencesCache} from '@/config/preferences';
-import type {Session} from '@/session/session-manager';
-import {sessionManager} from '@/session/session-manager';
+import {
+	formatCorruptSessionMessage,
+	type Session,
+	sessionManager,
+} from '@/session/session-manager';
 import {readFileTool} from '@/tools/read-file';
 import {clearReadTracker} from '@/tools/runtime/read-tracker';
 import {writeFileSync} from 'fs';
@@ -964,14 +967,24 @@ const otherProviderSession = {
 } as unknown as Session;
 
 async function withStoredSession(session: Session, run: () => Promise<void>) {
-	const {initialize, listSessions, loadSession} = sessionManager;
+	const {initialize, listSessions, loadSession, readSessionResult} =
+		sessionManager;
 	sessionManager.initialize = async () => {};
 	sessionManager.listSessions = async () => [];
 	sessionManager.loadSession = async id => (id === session.id ? session : null);
+	sessionManager.readSessionResult = async id =>
+		id === session.id
+			? {ok: true, session}
+			: {ok: false, reason: 'missing'};
 	try {
 		await run();
 	} finally {
-		Object.assign(sessionManager, {initialize, listSessions, loadSession});
+		Object.assign(sessionManager, {
+			initialize,
+			listSessions,
+			loadSession,
+			readSessionResult,
+		});
 	}
 }
 
@@ -993,6 +1006,42 @@ test.serial('the session picker switches the client to the resumed session', asy
 		]);
 		t.true(appliedBeforeSwitch, 'the conversation is applied before the switch');
 	});
+});
+
+test.serial('the session picker names a corrupt file instead of saying not found', async t => {
+	const filePath = join(
+		process.cwd(),
+		'sessions',
+		`${otherProviderSession.id}.json`,
+	);
+	const {initialize, listSessions, loadSession, readSessionResult} =
+		sessionManager;
+	sessionManager.initialize = async () => {};
+	sessionManager.listSessions = async () => [];
+	sessionManager.loadSession = async () => null;
+	sessionManager.readSessionResult = async () => ({
+		ok: false,
+		reason: 'corrupt',
+		filePath,
+		error: new Error('bad json'),
+	});
+	try {
+		const {handlers, spies} = setup({});
+
+		await handlers.handleSessionSelect(otherProviderSession.id);
+
+		const message = spies.addToChatQueue
+			.calls[0]?.[0] as React.ReactElement<{message: string}>;
+		t.is(message.props.message, formatCorruptSessionMessage(filePath));
+		t.deepEqual(spies.setActiveMode.calls, [[null]]);
+	} finally {
+		Object.assign(sessionManager, {
+			initialize,
+			listSessions,
+			loadSession,
+			readSessionResult,
+		});
+	}
 });
 
 test.serial('/resume <id> switches the client before the command completes', async t => {

@@ -3,7 +3,10 @@ import {isApprovedPlanMessage} from '@/artifacts/approved-plan';
 import {isInternalWalkthroughMessage} from '@/artifacts/walkthrough-lifecycle';
 import {getAppConfig} from '@/config/index';
 import {BASH_OUTPUT_PREFIX} from '@/constants';
-import {sessionManager} from '@/session/session-manager';
+import {
+	formatCorruptSessionMessage,
+	sessionManager,
+} from '@/session/session-manager';
 import {deriveTitleFromFirstMessage} from '@/session/title-generator';
 import type {Message} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
@@ -102,6 +105,9 @@ export function useSessionAutosave({
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 	const lastSaveRef = useRef<number>(0);
+	// A transient read failure can repeat on every autosave tick. Warn once per
+	// session so the user knows saves are paused without flooding the chat.
+	const warnedUnreadableRef = useRef<Set<string>>(new Set());
 
 	// Serialises saves: each new save is chained onto the tail of this promise.
 	const saveChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -237,8 +243,9 @@ export function useSessionAutosave({
 				const titleManuallySet = pendingTitle !== null ? true : undefined;
 
 				if (liveSessionId) {
-					const session = await sessionManager.readSession(liveSessionId);
-					if (session) {
+					const read = await sessionManager.readSessionResult(liveSessionId);
+					if (read.ok) {
+						const session = read.session;
 						// Write the full history — no truncation.
 						session.messages = persistedMessages;
 						session.messageCount = persistedMessages.length;
@@ -258,7 +265,34 @@ export function useSessionAutosave({
 						session.lastAccessedAt = new Date().toISOString();
 						await sessionManager.saveSession(session);
 					} else {
-						// The stored session was deleted externally; create a fresh one.
+						if (read.reason === 'unreadable') {
+							// The bytes may be perfectly valid — a permission error,
+							// EMFILE or a Windows sharing violation just kept us from
+							// reading them. Never move a healthy file aside or replace
+							// it on a transient failure: skip this tick instead.
+							if (!warnedUnreadableRef.current.has(liveSessionId)) {
+								warnedUnreadableRef.current.add(liveSessionId);
+								notifyWarning(
+									`${formatCorruptSessionMessage(read.filePath)} Autosave skipped because the file could not be read right now; no changes were made.`,
+								);
+							}
+							return;
+						}
+						if (read.reason === 'corrupt') {
+							const backupPath =
+								await sessionManager.quarantineCorruptSession(liveSessionId);
+							if (!backupPath) {
+								notifyWarning(
+									`${formatCorruptSessionMessage(read.filePath)} Autosave skipped because the file could not be backed up.`,
+								);
+								return;
+							}
+							notifyWarning(
+								`${formatCorruptSessionMessage(read.filePath)} It was moved to ${backupPath} before the session was recreated.`,
+							);
+						}
+						// The stored session was deleted externally (or corrupt and
+						// now safely backed up); create a fresh one.
 						const newSession = await sessionManager.createSession({
 							id: liveSessionId,
 							title,

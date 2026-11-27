@@ -713,6 +713,7 @@ test.serial('resume command - /resume last resumes most recent session', async t
 	};
 	const origInit = sessionManager.initialize.bind(sessionManager);
 	const origList = sessionManager.listSessions.bind(sessionManager);
+	const origRead = sessionManager.readSessionResult.bind(sessionManager);
 	const origLoad = sessionManager.loadSession.bind(sessionManager);
 	sessionManager.initialize = async () => {};
 	sessionManager.listSessions = async () => [
@@ -727,6 +728,10 @@ test.serial('resume command - /resume last resumes most recent session', async t
 			workingDirectory: mockSession.workingDirectory,
 		},
 	];
+	sessionManager.readSessionResult = async (id: string) =>
+		id === mockSession.id
+			? {ok: true, session: mockSession}
+			: {ok: false, reason: 'missing'};
 	sessionManager.loadSession = async (id: string) =>
 		id === mockSession.id ? mockSession : null;
 	try {
@@ -743,6 +748,7 @@ test.serial('resume command - /resume last resumes most recent session', async t
 	} finally {
 		sessionManager.initialize = origInit;
 		sessionManager.listSessions = origList;
+		sessionManager.readSessionResult = origRead;
 		sessionManager.loadSession = origLoad;
 	}
 });
@@ -761,6 +767,7 @@ test.serial('resume command - /resume 1 resumes session at index 1', async t => 
 	};
 	const origInit = sessionManager.initialize.bind(sessionManager);
 	const origList = sessionManager.listSessions.bind(sessionManager);
+	const origRead = sessionManager.readSessionResult.bind(sessionManager);
 	const origLoad = sessionManager.loadSession.bind(sessionManager);
 	sessionManager.initialize = async () => {};
 	sessionManager.listSessions = async () => [
@@ -775,6 +782,10 @@ test.serial('resume command - /resume 1 resumes session at index 1', async t => 
 			workingDirectory: '/tmp',
 		},
 	];
+	sessionManager.readSessionResult = async (id: string) =>
+		id === mockSession.id
+			? {ok: true, session: mockSession}
+			: {ok: false, reason: 'missing'};
 	sessionManager.loadSession = async (id: string) =>
 		id === mockSession.id ? mockSession : null;
 	try {
@@ -791,6 +802,7 @@ test.serial('resume command - /resume 1 resumes session at index 1', async t => 
 	} finally {
 		sessionManager.initialize = origInit;
 		sessionManager.listSessions = origList;
+		sessionManager.readSessionResult = origRead;
 		sessionManager.loadSession = origLoad;
 	}
 });

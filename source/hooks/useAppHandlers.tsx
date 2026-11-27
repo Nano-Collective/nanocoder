@@ -30,8 +30,11 @@ import {
 } from '@/services/lifecycle-hooks';
 import {getProjectRoot} from '@/services/session-cwd';
 import {buildSessionHistoryComponents} from '@/session/session-history-renderer';
-import type {Session} from '@/session/session-manager';
-import {sessionManager} from '@/session/session-manager';
+import {
+	formatCorruptSessionMessage,
+	type Session,
+	sessionManager,
+} from '@/session/session-manager';
 import {createTokenizer} from '@/tokenization/index';
 import {
 	type GitStatusSummary,
@@ -689,14 +692,24 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	const handleSessionSelect = React.useCallback(
 		async (sessionId: string) => {
 			try {
-				const session = await sessionManager.loadSession(sessionId);
+				// Check readability first: loadSession would read the same file
+				// again before returning null for a missing or corrupt session.
+				const read = await sessionManager.readSessionResult(sessionId);
+				const session = read.ok
+					? await sessionManager.loadSession(sessionId)
+					: null;
 				if (session) {
 					await resumeSession(session);
 				} else {
+					const message =
+						!read.ok &&
+						(read.reason === 'corrupt' || read.reason === 'unreadable')
+							? formatCorruptSessionMessage(read.filePath)
+							: 'Session not found';
 					addToChatQueue(
 						<ErrorMessage
 							key={generateKey('resume-error')}
-							message="Session not found"
+							message={message}
 							hideBox={true}
 						/>,
 					);

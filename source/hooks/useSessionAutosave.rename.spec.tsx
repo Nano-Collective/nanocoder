@@ -1,4 +1,11 @@
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -150,4 +157,73 @@ test.serial('a pending rename is dropped when another session is resumed', async
 	t.falsy(saved?.titleManuallySet);
 	t.is(saved?.messageCount, 2);
 	view.unmount();
+});
+
+test.serial('a corrupt session file is backed up before autosave recreates it', async t => {
+	const view = renderHook([]);
+	const session = await sessionManager.createSession({
+		title: 'Doomed session',
+		messageCount: 1,
+		provider: 'p',
+		model: 'm',
+		workingDirectory: root,
+		messages: [{role: 'user', content: 'before corruption'}],
+	});
+	view.hook.setSessionId(session.id);
+
+	const sessionPath = join(
+		sessionManager.getSessionDirectory(),
+		`${session.id}.json`,
+	);
+	const corruptContents = '{"truncated":';
+	writeFileSync(sessionPath, corruptContents);
+
+	view.setMessages([{role: 'user', content: 'after corruption'}]);
+	await wait(1300);
+
+	const backupPath = `${sessionPath}.corrupt`;
+	t.is(readFileSync(backupPath, 'utf8'), corruptContents);
+	const saved = await sessionManager.readSession(session.id);
+	t.truthy(saved);
+	t.is(saved?.title, 'after corruption');
+	t.is(saved?.messageCount, 1);
+	view.unmount();
+});
+
+test.serial('a transiently unreadable session is neither backed up nor replaced', async t => {
+	const view = renderHook([]);
+	const session = await sessionManager.createSession({
+		title: 'Healthy session',
+		messageCount: 1,
+		provider: 'p',
+		model: 'm',
+		workingDirectory: root,
+		messages: [{role: 'user', content: 'before read error'}],
+	});
+	view.hook.setSessionId(session.id);
+
+	const sessionPath = join(
+		sessionManager.getSessionDirectory(),
+		`${session.id}.json`,
+	);
+	const originalContents = readFileSync(sessionPath, 'utf8');
+	const originalReadSessionResult = sessionManager.readSessionResult;
+	sessionManager.readSessionResult = async () => ({
+		ok: false,
+		reason: 'unreadable',
+		filePath: sessionPath,
+		error: Object.assign(new Error('EACCES: permission denied'), {
+			code: 'EACCES',
+		}),
+	});
+	try {
+		view.setMessages([{role: 'user', content: 'after read error'}]);
+		await wait(1300);
+
+		t.false(existsSync(`${sessionPath}.corrupt`));
+		t.is(readFileSync(sessionPath, 'utf8'), originalContents);
+	} finally {
+		sessionManager.readSessionResult = originalReadSessionResult;
+		view.unmount();
+	}
 });

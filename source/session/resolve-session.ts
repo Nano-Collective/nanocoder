@@ -1,7 +1,15 @@
-import type {Session, SessionManager} from './session-manager';
-import {sessionManager} from './session-manager';
+import {
+	formatCorruptSessionMessage,
+	type Session,
+	type SessionManager,
+	sessionManager,
+} from './session-manager';
 
-export type ResolveSessionFailureReason = 'not-found' | 'empty';
+export type ResolveSessionFailureReason =
+	| 'not-found'
+	| 'empty'
+	| 'corrupt'
+	| 'unreadable';
 
 export type ResolveSessionResult =
 	| {ok: true; session: Session}
@@ -32,6 +40,10 @@ export interface ResolveSessionOptions {
  *    so a raw uuid resolves correctly even when `all` is false and the
  *    session belongs to a different cwd. This matches the pre-refactor
  *    behavior of /resume.
+ *  - a session file that exists but cannot be parsed is reported as 'corrupt'
+ *    with its path, rather than as a missing session. A transient read failure
+ *    (EACCES, EMFILE, a sharing violation) is reported as 'unreadable', so it
+ *    is never mistaken for corruption that should be quarantined.
  */
 export async function resolveSession(
 	arg: string | undefined,
@@ -67,8 +79,18 @@ export async function resolveSession(
 		}
 	}
 
-	const session = await manager.loadSession(sessionId);
-	if (!session) {
+	// Read with detail first: loadSession returns null for a missing, corrupt or
+	// temporarily unreadable file, and retrying it would read the same file
+	// twice on every failure path.
+	const read = await manager.readSessionResult(sessionId);
+	if (!read.ok) {
+		if (read.reason === 'corrupt' || read.reason === 'unreadable') {
+			return {
+				ok: false,
+				reason: read.reason,
+				message: formatCorruptSessionMessage(read.filePath),
+			};
+		}
 		return {
 			ok: false,
 			reason: 'not-found',
@@ -76,5 +98,14 @@ export async function resolveSession(
 		};
 	}
 
-	return {ok: true, session};
+	// loadSession refreshes lastAccessedAt; the detailed read above already
+	// verified the file is usable, so this only writes the access time.
+	const session = await manager.loadSession(sessionId);
+	if (session) return {ok: true, session};
+
+	return {
+		ok: false,
+		reason: 'not-found',
+		message: `Session not found: ${sessionId}`,
+	};
 }
