@@ -92,6 +92,63 @@ test('buildSystemPrompt - always includes system information', t => {
 	t.true(result.includes('Current Date:'));
 });
 
+function withPlatformAndEnv(
+	platform: NodeJS.Platform,
+	env: Record<string, string | undefined>,
+	fn: () => void,
+) {
+	const originalPlatform = process.platform;
+	const originalEnv: Record<string, string | undefined> = {};
+	for (const key of Object.keys(env)) originalEnv[key] = process.env[key];
+	Object.defineProperty(process, 'platform', {value: platform, configurable: true});
+	for (const [key, value] of Object.entries(env)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
+	try {
+		fn();
+	} finally {
+		Object.defineProperty(process, 'platform', {
+			value: originalPlatform,
+			configurable: true,
+		});
+		for (const [key, value] of Object.entries(originalEnv)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}
+}
+
+test.serial('buildSystemPrompt - reports ComSpec as the shell on Windows even when SHELL is set', t => {
+	withPlatformAndEnv(
+		'win32',
+		{SHELL: '/usr/bin/bash', ComSpec: 'C:\\Windows\\system32\\cmd.exe'},
+		() => {
+			const result = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+			t.true(result.includes('Default Shell: C:\\Windows\\system32\\cmd.exe'));
+			t.false(result.includes('Default Shell: /usr/bin/bash'));
+		},
+	);
+});
+
+test.serial('buildSystemPrompt - falls back to cmd.exe on Windows without ComSpec', t => {
+	withPlatformAndEnv(
+		'win32',
+		{SHELL: '/usr/bin/bash', ComSpec: undefined, COMSPEC: undefined},
+		() => {
+			const result = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+			t.true(result.includes('Default Shell: cmd.exe'));
+		},
+	);
+});
+
+test.serial('buildSystemPrompt - uses SHELL on non-Windows platforms', t => {
+	withPlatformAndEnv('linux', {SHELL: '/usr/bin/fish'}, () => {
+		const result = buildSystemPrompt('normal', undefined, ALL_TOOLS);
+		t.true(result.includes('Default Shell: /usr/bin/fish'));
+	});
+});
+
 // ============================================================================
 // buildSystemPrompt — mode-specific task approach
 // ============================================================================

@@ -82,8 +82,10 @@ function generateSystemInfo(slim = false): string {
 	const dateStr = now.toISOString().split('T')[0];
 
 	const getDefaultShell = (): string => {
+		// execute_bash runs commands through ComSpec on Windows, even when SHELL
+		// is set by Git Bash or MSYS2.
+		if (platform() === 'win32') return process.env.ComSpec || 'cmd.exe';
 		if (process.env.SHELL) return process.env.SHELL;
-		if (platform() === 'win32') return process.env.COMSPEC || 'cmd.exe';
 		if (platform() === 'darwin') return '/bin/zsh';
 		return '/bin/bash';
 	};
