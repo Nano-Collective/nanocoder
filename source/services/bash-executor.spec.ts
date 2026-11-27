@@ -794,6 +794,28 @@ cmdQuotingTest('cmd.exe quoting - & still chains commands', async t => {
 	const result = await runInCwd('echo a & echo b');
 	t.deepEqual(result.fullOutput.trim().split(/\s*\r?\n/), ['a', 'b']);
 });
+
+// cmd.exe writes in the console's OEM code page unless it is switched to UTF-8,
+// and the output is decoded as UTF-8 (#2344).
+cmdQuotingTest('cmd.exe output - keeps non-ASCII text', async t => {
+	const result = await runInCwd('echo héllo wörld 你好');
+	t.is(result.exitCode, 0, result.stderr);
+	t.is(result.fullOutput.trim(), 'héllo wörld 你好');
+});
+
+cmdQuotingTest('cmd.exe output - keeps non-ASCII file names', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nc-utf8-'));
+	t.teardown(() => rmSync(dir, {recursive: true, force: true}));
+	writeFileSync(join(dir, 'résumé-文档.txt'), '');
+	const result = await runInCwd('dir /b', dir);
+	t.is(result.exitCode, 0, result.stderr);
+	t.is(result.fullOutput.trim(), 'résumé-文档.txt');
+});
+
+cmdQuotingTest('cmd.exe output - keeps the command exit code', async t => {
+	const result = await runInCwd('exit /b 3');
+	t.is(result.exitCode, 3);
+});
 /* c8 ignore stop */
 
 // Also run on Windows CI, where the shell is `cmd /c` and only taskkill /T
