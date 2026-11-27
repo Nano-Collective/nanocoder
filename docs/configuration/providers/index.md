@@ -32,6 +32,7 @@ Run on your machine, typically no API key required.
 - [vLLM](vllm.md) - High-throughput serving engine
 - [LocalAI](localai.md) - OpenAI-compatible local API
 - [llama-swap](llama-swap.md) - Model multiplexer for llama.cpp
+- [Rapid-MLX](rapid-mlx.md) - High-performance Apple Silicon MLX inference server
 
 ## Cloud Providers (OpenAI-Compatible)
 
