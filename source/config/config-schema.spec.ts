@@ -116,7 +116,7 @@ test('all documented nanocoder fields are accepted together', t => {
 // ---------------------------------------------------------------------------
 
 test('defaultMode accepts every valid mode', t => {
-	for (const mode of ['normal', 'auto-accept', 'yolo', 'plan']) {
+	for (const mode of ['normal', 'auto-accept', 'yolo', 'plan', 'architect']) {
 		assertValid(t, `defaultMode ${mode}`, {nanocoder: {defaultMode: mode}});
 	}
 });
@@ -274,13 +274,63 @@ test('lsp auto-discovery setting is optional and boolean', t => {
 });
 
 // ---------------------------------------------------------------------------
-// mcpServers belong in .mcp.json, not agents.config.json
+// mcpServers: profile-only within agents.config.json
 // ---------------------------------------------------------------------------
 
-test('mcpServers is rejected in agents.config.json (the loader never reads it)', t => {
-	assertInvalid(t, 'mcpServers in agents.config.json', {
-		nanocoder: {mcpServers: [{name: 'm', transport: 'stdio'}]},
+test('mcpServers is rejected outside a profile in agents.config.json', t => {
+	assertInvalid(t, 'mcpServers at nanocoder level', {
+		nanocoder: {mcpServers: {local: {command: 'node'}}},
 	});
+});
+
+test('profile mcpServers accepts .mcp.json-style server definitions keyed by name', t => {
+	assertValid(t, 'named profile with MCP servers', {
+		nanocoder: {
+			defaultProfile: 'review',
+			profiles: {
+				review: {
+					mode: 'architect',
+					retries: {maxEmptyTurns: 3},
+					mcpServers: {
+						local: {command: 'node', args: ['server.js']},
+						docs: {
+							transport: 'http',
+							url: 'https://example.com/mcp',
+							headers: {Authorization: '$DOCS_TOKEN'},
+						},
+					},
+				},
+			},
+		},
+	});
+});
+
+test('profile mcpServers rejects arrays and runtime-only server fields', t => {
+	const withProfileServers = (mcpServers: unknown) => ({
+		nanocoder: {profiles: {review: {mcpServers}}},
+	});
+	assertInvalid(
+		t,
+		'array',
+		withProfileServers([{name: 'local', command: 'node'}]),
+	);
+	assertInvalid(
+		t,
+		'invalid transport',
+		withProfileServers({local: {transport: 'sse'}}),
+	);
+	for (const [key, value] of Object.entries({
+		name: 'local',
+		source: 'profile',
+		rawEnv: {},
+		rawHeaders: {},
+	})) {
+		assertInvalid(
+			t,
+			`runtime-only field ${key}`,
+			withProfileServers({local: {command: 'node', [key]: value}}),
+		);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -516,8 +566,8 @@ test('DiskNanocoderConfig exposes every on-disk key', t => {
 			`DiskNanocoderConfig should expose "${key}" (added to the on-disk type but missing from the schema?)`,
 		);
 	}
-	// Preferences-only keys must NOT be advertised on the agents.config.json schema.
-	for (const absent of ['notifications', 'sessions', 'paste', 'mcpServers']) {
+	// Preferences-only keys are outside the agents.config.json schema.
+	for (const absent of ['notifications', 'sessions', 'paste']) {
 		t.false(
 			props.includes(absent),
 			`"${absent}" lives in nanocoder-preferences.json and should not appear in the agents.config.json schema`,

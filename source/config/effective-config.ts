@@ -30,8 +30,6 @@
 
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import type {CliMode} from '@/app/types';
-import {VALID_MODES} from '@/app/types';
 import {
 	DEFAULT_AUTO_COMPACT_CONFIG,
 	DEFAULT_HEADLESS_CONFIG,
@@ -40,6 +38,7 @@ import {
 	getAppConfig,
 	getDefaultPasteConfig,
 	loadDefaultMode,
+	parseDefaultMode,
 } from '@/config/index';
 import {loadAllMCPConfigs} from '@/config/mcp-config-loader';
 import {getConfigPath} from '@/config/paths';
@@ -364,7 +363,13 @@ function readRawLayers(cwd: string, configDir: string): RawLayer[] {
 				file: 'agents.config.json',
 				path: profileOrigin,
 				exists: true,
-				data: {nanocoder: active.profile},
+				data: {
+					nanocoder: {
+						...active.profile,
+						// Match the synthetic layer used by loadHierarchicalConfig.
+						defaultMode: active.profile.mode ?? active.profile.defaultMode,
+					},
+				},
 			});
 		}
 	} catch {
@@ -442,6 +447,8 @@ interface BlockSpec {
 	defaults?: Record<string, unknown>;
 	/** Treat the block as one value instead of flattening it into leaves. */
 	leaf?: boolean;
+	/** Skip layers whose raw value the loader would reject. */
+	accept?: (value: unknown) => boolean;
 	/** Environment variable that can override a leaf inside this block. */
 	env?: {variable: string; leaf: string};
 	/** How deep to flatten. Defaults to 2 (block field, plus one nesting). */
@@ -502,8 +509,9 @@ function blockSpecs(cwd?: string): BlockSpec[] {
 		{
 			path: ['nanocoder', 'defaultMode'],
 			file: agents,
-			effective: loadDefaultMode(),
+			effective: loadDefaultMode(cwd),
 			leaf: true,
+			accept: value => parseDefaultMode(value) !== undefined,
 		},
 		{
 			path: ['nanocoder', 'alwaysAllow'],
@@ -597,7 +605,12 @@ function winningLayer(
 	const candidates = layers.filter(l => l.file === spec.file);
 	for (let i = candidates.length - 1; i >= 0; i--) {
 		const layer = candidates[i] as RawLayer;
-		if (hasAt(layer.data, spec.path)) return layer;
+		if (
+			hasAt(layer.data, spec.path) &&
+			(!spec.accept || spec.accept(getAt(layer.data, spec.path)))
+		) {
+			return layer;
+		}
 	}
 	return undefined;
 }
@@ -700,50 +713,18 @@ function resolveBlockEntries(
 
 		const {value, redacted} = redactValue(leaf.value, keyHint);
 
-		// `nanocoder.defaultMode` is resolved from an active profile's `mode`
-		// — the loader maps `mode` onto `defaultMode`
-		// (loadHierarchicalConfig in config/index.ts) and the profile
-		// outranks every file's own `defaultMode` — so the profile, not
-		// built-in or a project file, is the source when it supplies one.
-		let profileOrigin: string | undefined;
-		if (
-			value !== undefined &&
-			spec.path.join('.') === 'nanocoder.defaultMode'
-		) {
-			const profileLayer = layers.find(l => l.layer === 'profile');
-			if (profileLayer) {
-				const profileMode = getAt(profileLayer.data, ['nanocoder', 'mode']);
-				if (
-					typeof profileMode === 'string' &&
-					VALID_MODES.includes(profileMode.toLowerCase().trim() as CliMode)
-				) {
-					profileOrigin = profileLayer.path;
-				}
-			}
-		}
-
 		return {
 			key,
 			value,
 			redacted,
-			layer:
-				profileOrigin !== undefined
-					? 'profile'
-					: winnerSuppliesLeaf
-						? ((winner as RawLayer).layer as ConfigLayerId)
-						: ('default' as const),
-			origin:
-				profileOrigin !== undefined
-					? profileOrigin
-					: winnerSuppliesLeaf
-						? (winner as RawLayer).path
-						: 'built-in',
+			layer: winnerSuppliesLeaf ? winner.layer : ('default' as const),
+			origin: winnerSuppliesLeaf ? winner.path : 'built-in',
 			hasDefault,
 			defaultValue,
 			shadowed,
 			block: blockKey,
-			blockOrigin: profileOrigin !== undefined ? profileOrigin : winner?.path,
-			blockLayer: profileOrigin !== undefined ? 'profile' : winner?.layer,
+			blockOrigin: winner?.path,
+			blockLayer: winner?.layer,
 			rule: 'block' as const,
 		};
 	});
@@ -901,7 +882,7 @@ function readEnvProviderNames(): Set<string> {
 }
 
 /**
- * Server definitions in one `.mcp.json`, keyed by name. Mirrors
+ * Raw server definitions from one layer, keyed by name. Mirrors
  * `parseMCPServers`, which only accepts the object form.
  */
 function readMcpServers(
@@ -972,7 +953,7 @@ function resolveMcpEntries(
 		if (active) {
 			profileOrigin = active.originFile ?? `profile: ${active.name}`;
 			profileServers = readMcpServers(
-				active.profile as Record<string, unknown>,
+				isObject(active.profile) ? active.profile : null,
 			);
 		}
 	} catch {

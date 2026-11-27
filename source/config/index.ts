@@ -141,9 +141,7 @@ function loadHierarchicalConfig<T>(
 			const synthetic = {
 				nanocoder: {
 					...activeProfile,
-					defaultMode:
-						activeProfile.mode ??
-						(activeProfile as Record<string, unknown>).defaultMode,
+					defaultMode: activeProfile.mode ?? activeProfile.defaultMode,
 				},
 			};
 			const profileResult = extract(synthetic);
@@ -949,20 +947,22 @@ function loadCiWatchConfig(cwd: string): CiWatchConfig | undefined {
 	};
 }
 
+export function parseDefaultMode(value: unknown): CliMode | undefined {
+	if (typeof value !== 'string') return undefined;
+	const mode = value.toLowerCase().trim() as CliMode;
+	return VALID_MODES.includes(mode) ? mode : undefined;
+}
+
 export function loadDefaultMode(
 	cwd: string = getConfigRoot(),
 ): CliMode | undefined {
 	return (
-		loadHierarchicalConfig(cwd, 'agents.config.json', 'defaultMode', config => {
-			const defaultMode = config.nanocoder?.defaultMode;
-			if (typeof defaultMode === 'string') {
-				const normalized = defaultMode.toLowerCase().trim();
-				if ((VALID_MODES as readonly string[]).includes(normalized)) {
-					return normalized as CliMode;
-				}
-			}
-			return null;
-		}) ?? undefined
+		loadHierarchicalConfig(
+			cwd,
+			'agents.config.json',
+			'defaultMode',
+			config => parseDefaultMode(config.nanocoder?.defaultMode) ?? null,
+		) ?? undefined
 	);
 }
 

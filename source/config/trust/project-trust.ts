@@ -55,8 +55,9 @@ export interface ProjectTrustSurface {
  * project settings that relax confirmations (`alwaysAllow`, `defaultMode`,
  * `sandbox`, `verify.trustLevel`), and project provider `baseUrl`s. The
  * fingerprint covers those files, so a later edit is visible even when the
- * counts stay the same. Each part adds a line only when present, so a folder
- * without them keeps the fingerprint it had before they were covered.
+ * counts stay the same. Each part adds a line only when present, so absent
+ * settings leave the hash unchanged. Trust records still need re-approval
+ * after a fingerprint version bump, even if the hash matches.
  */
 export function describeProjectTrust(directory: string): ProjectTrustSurface {
 	const root = path.resolve(directory);

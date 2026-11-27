@@ -164,6 +164,10 @@ test("a profile's mode outranks a project-level defaultMode", t => {
 			const mode = entry(config, 'nanocoder.defaultMode');
 			t.is(mode?.value, 'yolo');
 			t.is(mode?.layer, 'profile');
+			t.deepEqual(
+				mode?.shadowed.map(({layer, value}) => ({layer, value})),
+				[{layer: 'project', value: 'plan'}],
+			);
 		},
 	);
 });
@@ -174,7 +178,7 @@ test('an invalid profile mode falls back to the project defaultMode', t => {
 			projectAgents: {
 				nanocoder: {
 					defaultMode: 'plan',
-					profiles: {fast: {mode: 'bogus'}},
+					profiles: {fast: {mode: 'bogus', defaultMode: 'yolo'}},
 					defaultProfile: 'fast',
 				},
 			},
@@ -184,6 +188,26 @@ test('an invalid profile mode falls back to the project defaultMode', t => {
 			const mode = entry(config, 'nanocoder.defaultMode');
 			t.is(mode?.value, 'plan');
 			t.is(mode?.layer, 'project');
+			t.deepEqual(
+				mode?.shadowed.map(({layer, value}) => ({layer, value})),
+				[{layer: 'profile', value: 'bogus'}],
+			);
+		},
+	);
+});
+
+test('an invalid project defaultMode falls back to the global defaultMode', t => {
+	withFixture(
+		{
+			projectAgents: {nanocoder: {defaultMode: 'bogus'}},
+			globalAgents: {nanocoder: {defaultMode: 'architect'}},
+		},
+		() => {
+			const show = runConfigCli('show', ['nanocoder.defaultMode']);
+			t.is(show.exitCode, 0);
+			t.regex(show.output, /value\s+architect/);
+			t.regex(show.output, /layer\s+global/);
+			t.regex(show.output, /the first valid mode wins/);
 		},
 	);
 });
@@ -217,6 +241,14 @@ test('profile mcpServers are shown as the profile layer', t => {
 			t.is(server?.layer, 'profile');
 			t.is((server?.value as {command?: unknown})?.command, 'npx');
 			t.true(typeof server?.origin === 'string' && server.origin.includes('agents.config.json'));
+
+			const show = runConfigCli('show', ['mcpServers.profile-server']);
+			t.is(show.exitCode, 0);
+			t.regex(show.output, /layer\s+profile/);
+			t.regex(
+				show.output,
+				/environment variable wins, then the active profile/,
+			);
 		},
 	);
 });

@@ -13,8 +13,9 @@
  *     (autoCompact, tune, headless) stay all-optional. Genuinely required
  *     fields are added by hand (ProviderConfig.name/models,
  *     OpenRouterPlugin.id, and lspServers item name/command/languages).
- *     MCP servers are not part of agents.config.json: they live in .mcp.json
- *     (or NANOCODER_MCPSERVERS), so MCPServerConfig is not in this schema.
+ *     MCP servers normally live in .mcp.json or NANOCODER_MCPSERVERS.
+ *     Within agents.config.json, only named profiles can declare them, using
+ *     DiskMCPServerConfig without runtime fields such as source or rawEnv.
  *   - `--noExtraProps` is NOT used: it corrupts `Record<string, X>` into
  *     `{type:object, additionalProperties:false}` which rejects every key.
  *     Instead `additionalProperties: false` is applied eagerly to every

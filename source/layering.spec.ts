@@ -76,11 +76,6 @@ const DOCUMENTED_EXCEPTIONS: Edge[] = [
 		reason: 'Validates the configured default mode against VALID_MODES / CliMode, which app/types.ts owns.',
 	},
 	{
-		from: 'source/config/effective-config.ts',
-		to: 'source/app/types.ts',
-		reason: 'Validates an active profile\'s mode against VALID_MODES / CliMode when resolving nanocoder.defaultMode, which app/types.ts owns.',
-	},
-	{
 		from: 'source/config/lint.ts',
 		to: 'source/ai-sdk-client/providers/openrouter.ts',
 		reason: 'isOpenRouterProvider decides whether a provider\'s `openrouter` block applies; the linter must agree with the client.',
