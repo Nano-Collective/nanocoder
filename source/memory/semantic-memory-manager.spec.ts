@@ -111,6 +111,82 @@ test('SemanticMemoryManager stores memory category', async t => {
 	t.deepEqual(await manager.listMemories(), [memory]);
 });
 
+test('SemanticMemoryManager returns the existing memory when only whitespace differs', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const first = await manager.addMemory({
+		content: 'Use the existing provider abstraction for model changes.',
+		category: 'architecture',
+	});
+	const duplicate = await manager.addMemory({
+		content: '  Use   the existing provider abstraction for model changes.  ',
+		category: 'project',
+	});
+
+	t.is(duplicate.id, first.id);
+	// An inferred/default category does not replace the stored one.
+	t.is(duplicate.category, 'architecture');
+	t.deepEqual(await manager.listMemories(), [duplicate]);
+});
+
+test('SemanticMemoryManager applies an explicit category to duplicate content', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const first = await manager.addMemory({
+		content: 'Use the existing provider abstraction for model changes.',
+		category: 'architecture',
+	});
+	const updated = await manager.addMemory({
+		content: '  Use the existing provider abstraction for model changes.  ',
+		category: 'todo',
+		explicitCategory: true,
+	});
+
+	t.is(updated.id, first.id);
+	t.is(updated.category, 'todo');
+	t.deepEqual(await manager.listMemories(), [updated]);
+});
+
+test('SemanticMemoryManager treats a case change as a different memory', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const first = await manager.addMemory({content: 'Set the api_key variable first.'});
+	const corrected = await manager.addMemory({
+		content: 'Set the API_KEY variable first.',
+	});
+
+	t.not(corrected.id, first.id);
+	t.deepEqual(await manager.listMemories(), [first, corrected]);
+});
+
+test('SemanticMemoryManager saveMemory reports create versus update', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+
+	const created = await manager.saveMemory({content: 'Keep components small.'});
+	t.true(created.created);
+	t.false(created.updated);
+
+	const updated = await manager.saveMemory({
+		content: '  Keep components small.  ',
+	});
+	t.false(updated.created);
+	t.true(updated.updated);
+	t.is(updated.memory.id, created.memory.id);
+	t.deepEqual(await manager.listMemories(), [updated.memory]);
+});
+
 test('SemanticMemoryManager deletes and clears memories', async t => {
 	const dir = await createTempDir();
 	const cwd = path.join(dir, 'repo');
@@ -472,6 +548,32 @@ test('findChangedFiles does not flag a memory just because HEAD moved on', async
 	commitAll(repo, 'unrelated change');
 
 	t.is((await manager.findChangedFiles([memory])).size, 0);
+});
+
+test('saving a duplicate refreshes its git snapshot and timestamp', async t => {
+	const {dir, repo} = await createGitRepo({
+		'src/auth.ts': 'export const refresh = 1;\n',
+	});
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd: repo});
+	const first = await manager.addMemory({content: 'src/auth.ts refreshes tokens.'});
+	t.truthy(first.git);
+
+	await new Promise(resolve => setTimeout(resolve, 5));
+	await writeFiles(repo, {'src/auth.ts': 'export const refresh = 2;\n'});
+	commitAll(repo, 'update auth');
+
+	const refreshed = await manager.addMemory({
+		content: '  src/auth.ts refreshes tokens.  ',
+	});
+
+	t.is(refreshed.id, first.id);
+	t.not(refreshed.timestamp, first.timestamp);
+	t.deepEqual(refreshed.git, {
+		commit: git(repo, 'rev-parse', 'HEAD'),
+		branch: 'main',
+		files: {'src/auth.ts': git(repo, 'hash-object', 'src/auth.ts')},
+	});
+	t.is((await manager.findChangedFiles([refreshed])).size, 0);
 });
 
 test('findChangedFiles ignores memories saved without a snapshot', async t => {

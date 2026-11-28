@@ -1,6 +1,9 @@
 import test from 'ava';
 import React from 'react';
-import type {SemanticMemory} from '@/memory/semantic-memory-manager';
+import type {
+	SaveMemoryResult,
+	SemanticMemory,
+} from '@/memory/semantic-memory-manager';
 import {SummarizerService} from '@/memory/summarizer-service';
 import {renderWithTheme} from '@/test-utils/render-with-theme';
 import type {Message} from '@/types/core';
@@ -24,7 +27,7 @@ class FakeSummarizerService extends SummarizerService {
 	};
 
 	constructor(
-		private readonly memory: SemanticMemory,
+		private readonly result: SaveMemoryResult,
 		private readonly error?: Error,
 	) {
 		super();
@@ -34,10 +37,10 @@ class FakeSummarizerService extends SummarizerService {
 		content: string;
 		category?: string;
 		sourceSessionId?: string;
-	}): Promise<SemanticMemory> {
+	}): Promise<SaveMemoryResult> {
 		this.rememberedInput = input;
 		if (this.error) throw this.error;
-		return this.memory;
+		return this.result;
 	}
 }
 
@@ -52,9 +55,15 @@ const savedMemory: SemanticMemory = {
 	timestamp: '2026-07-15T00:00:00.000Z',
 };
 
+const savedResult: SaveMemoryResult = {
+	memory: savedMemory,
+	created: true,
+	updated: false,
+};
+
 test('memory add returns usage when content is missing', async t => {
 	const command = createMemoryCommand({
-		summarizerService: new FakeSummarizerService(savedMemory),
+		summarizerService: new FakeSummarizerService(savedResult),
 	});
 	const result = await command.handler(['add'], [], testMetadata);
 	t.truthy(React.isValidElement(result));
@@ -62,7 +71,7 @@ test('memory add returns usage when content is missing', async t => {
 });
 
 test('memory add returns usage when --category has no value', async t => {
-	const service = new FakeSummarizerService(savedMemory);
+	const service = new FakeSummarizerService(savedResult);
 	const command = createMemoryCommand({summarizerService: service});
 	const result = await command.handler(
 		['add', '--category'],
@@ -74,7 +83,7 @@ test('memory add returns usage when --category has no value', async t => {
 });
 
 test('memory add saves a manual memory', async t => {
-	const service = new FakeSummarizerService(savedMemory);
+	const service = new FakeSummarizerService(savedResult);
 	const command = createMemoryCommand({summarizerService: service});
 
 	const result = await command.handler(
@@ -90,9 +99,35 @@ test('memory add saves a manual memory', async t => {
 	t.true(render(result).includes('Remembered architecture memory.'));
 });
 
+test('memory add reports an already saved memory instead of a new save', async t => {
+	for (const [updated, status] of [
+		[true, 'updated'],
+		[false, 'unchanged'],
+	] as const) {
+		const service = new FakeSummarizerService({
+			memory: savedMemory,
+			created: false,
+			updated,
+		});
+		const command = createMemoryCommand({summarizerService: service});
+
+		const result = await command.handler(
+			['add', 'Use', 'the', 'existing', 'auth', 'adapter.'],
+			[],
+			testMetadata,
+		);
+		const output = render(result);
+
+		t.false(output.includes('Remembered architecture memory.'));
+		t.true(output.includes('already saved'));
+		t.true(output.includes('memory1'));
+		t.true(output.includes(status));
+	}
+});
+
 test('memory add forwards an explicit category (long and short flag)', async t => {
 	for (const flag of ['--category', '-c']) {
-		const service = new FakeSummarizerService(savedMemory);
+		const service = new FakeSummarizerService(savedResult);
 		const command = createMemoryCommand({summarizerService: service});
 
 		await command.handler(
@@ -110,7 +145,7 @@ test('memory add forwards an explicit category (long and short flag)', async t =
 
 test('memory add reports save failures', async t => {
 	const service = new FakeSummarizerService(
-		savedMemory,
+		savedResult,
 		new Error('disk full'),
 	);
 	const command = createMemoryCommand({summarizerService: service});
@@ -128,7 +163,7 @@ test('/remember expands to /memory add with its arguments intact', async t => {
 	const expanded = expandCommandAlias('/remember -c todo Ship the docs');
 	t.is(expanded, '/memory add -c todo Ship the docs');
 
-	const service = new FakeSummarizerService(savedMemory);
+	const service = new FakeSummarizerService(savedResult);
 	const command = createMemoryCommand({summarizerService: service});
 	const [, ...args] = expanded.slice(1).split(/\s+/);
 	await command.handler(args, [], testMetadata);

@@ -1,7 +1,8 @@
 import {getSemanticMemoryEnabled} from '@/config/preferences';
 import type {Message} from '@/types/core';
+import {stripTurnContext} from '@/utils/turn-context';
 import {
-	type SemanticMemory,
+	type SaveMemoryResult,
 	SemanticMemoryManager,
 } from './semantic-memory-manager';
 
@@ -266,12 +267,12 @@ export class SummarizerService {
 	constructor(
 		private readonly memoryManager: Pick<
 			SemanticMemoryManager,
-			'addMemory'
+			'saveMemory'
 		> = new SemanticMemoryManager(),
 		private readonly isMemoryEnabled: () => boolean = getSemanticMemoryEnabled,
 	) {}
 
-	async remember(input: RememberMemoryInput): Promise<SemanticMemory> {
+	async remember(input: RememberMemoryInput): Promise<SaveMemoryResult> {
 		this.assertMemoryWritesEnabled();
 
 		const content = input.content.trim();
@@ -279,11 +280,14 @@ export class SummarizerService {
 			throw new Error('Memory content cannot be empty');
 		}
 
-		return this.memoryManager.addMemory({
+		return this.memoryManager.saveMemory({
 			content,
 			category: input.category
 				? toCamelCaseCategory(input.category)
 				: inferMemoryCategory(content),
+			// An inferred category is fine for a new memory, but must not replace
+			// a category the user explicitly set on an existing one.
+			explicitCategory: input.category !== undefined,
 			sourceSessionId: input.sourceSessionId,
 		});
 	}
@@ -291,12 +295,14 @@ export class SummarizerService {
 	async acceptProposal(
 		proposal: Pick<MemoryProposal, 'content' | 'category'>,
 		sourceSessionId?: string,
-	): Promise<SemanticMemory> {
+	): Promise<SaveMemoryResult> {
 		this.assertMemoryWritesEnabled();
 
-		return this.memoryManager.addMemory({
+		return this.memoryManager.saveMemory({
 			content: proposal.content,
 			category: proposal.category,
+			// Proposal categories are inferred from conversation text, so they
+			// seed new memories without overwriting an explicit stored category.
 			sourceSessionId,
 		});
 	}
@@ -310,6 +316,14 @@ export class SummarizerService {
 	}
 
 	proposeMemoriesFromMessages(messages: Message[]): MemoryProposal[] {
+		// Recalled memories and matched skills ride in a trailing <turn-context>
+		// block. That is injected context, not something the user stated, so it
+		// must not be mined for proposals (or used as reversal evidence).
+		const readableMessages = messages.map(message => ({
+			...message,
+			content: stripTurnContext(message.content),
+		}));
+
 		const proposals = new Map<
 			string,
 			{
@@ -324,10 +338,13 @@ export class SummarizerService {
 
 		// Only the most recent turns are scanned; older ones would swell the
 		// printed list past what anyone reviews by eye.
-		const firstScanned = Math.max(0, messages.length - MAX_SCANNED_MESSAGES);
+		const firstScanned = Math.max(
+			0,
+			readableMessages.length - MAX_SCANNED_MESSAGES,
+		);
 
-		for (let i = firstScanned; i < messages.length; i++) {
-			const message = messages[i];
+		for (let i = firstScanned; i < readableMessages.length; i++) {
+			const message = readableMessages[i];
 			if (!message || (message.role !== 'user' && message.role !== 'assistant'))
 				continue;
 
@@ -369,7 +386,7 @@ export class SummarizerService {
 					message.role === 'assistant' &&
 					entry.sourceRole !== 'user' &&
 					!entry.warnings.includes(REVERSAL_WARNING) &&
-					this.isAssistantReversal(messages, i)
+					this.isAssistantReversal(readableMessages, i)
 				) {
 					entry.warnings.push(REVERSAL_WARNING);
 				}

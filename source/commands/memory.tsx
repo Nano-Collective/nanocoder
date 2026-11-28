@@ -4,8 +4,12 @@ import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
 import {useTerminalWidth} from '@/hooks/useTerminalWidth';
 import {useTheme} from '@/hooks/useTheme';
 import {ProposalStore, sharedProposalStore} from '@/memory/proposal-store';
-import type {SemanticMemory} from '@/memory/semantic-memory-manager';
-import {SemanticMemoryManager} from '@/memory/semantic-memory-manager';
+import {
+	findMatchingMemory,
+	type SaveMemoryResult,
+	type SemanticMemory,
+	SemanticMemoryManager,
+} from '@/memory/semantic-memory-manager';
 import type {MemoryProposal} from '@/memory/summarizer-service';
 import {SummarizerService} from '@/memory/summarizer-service';
 import type {Command} from '@/types/commands';
@@ -14,7 +18,7 @@ import {formatError} from '@/utils/error-formatter';
 interface MemoryCommandOptions {
 	memoryManager?: Pick<
 		SemanticMemoryManager,
-		'listMemories' | 'deleteMemory' | 'clearMemories' | 'addMemory'
+		'listMemories' | 'deleteMemory' | 'clearMemories' | 'saveMemory'
 	>;
 	summarizerService?: Pick<
 		SummarizerService,
@@ -67,6 +71,31 @@ const SHORT_ID_LENGTH = 8;
 
 export function shortMemoryId(id: string): string {
 	return id.replaceAll('-', '').slice(0, SHORT_ID_LENGTH);
+}
+
+/** Reports a fresh save and an already-saved refresh differently. */
+function savedMemoryMessage(
+	result: SaveMemoryResult,
+	verb: 'Remembered' | 'Saved',
+	keyHint: string,
+) {
+	const {memory, created, updated} = result;
+	if (created) {
+		return successMsg(
+			verb === 'Remembered'
+				? `Remembered ${memory.category} memory.`
+				: `Saved ${memory.category} memory: ${memory.content}`,
+			keyHint,
+		);
+	}
+
+	const status = updated ? 'updated' : 'unchanged';
+	return infoMsg(
+		verb === 'Remembered'
+			? `Memory ${shortMemoryId(memory.id)} (${memory.category}) was already saved (${status}).`
+			: `Already saved as memory ${shortMemoryId(memory.id)} (${memory.category}; ${status}).`,
+		keyHint,
+	);
 }
 
 type IdLookup =
@@ -250,14 +279,11 @@ export function createMemoryCommand(
 					}
 
 					try {
-						const memory = await summarizerService.remember({
+						const result = await summarizerService.remember({
 							content: parsed.content,
 							category: parsed.category,
 						});
-						return successMsg(
-							`Remembered ${memory.category} memory.`,
-							'memory-add',
-						);
+						return savedMemoryMessage(result, 'Remembered', 'memory-add');
 					} catch (error) {
 						return errorMsg(
 							`Failed to save memory: ${formatError(error)}`,
@@ -305,8 +331,15 @@ export function createMemoryCommand(
 				}
 
 				if (subcommand === 'propose') {
-					const proposals =
-						summarizerService.proposeMemoriesFromMessages(messages);
+					// Recalled memories can be repeated in the assistant's reply.
+					// Use the manager's own comparison so an already saved line is
+					// never offered as a new proposal.
+					const memories = await memoryManager.listMemories();
+					const proposals = summarizerService
+						.proposeMemoriesFromMessages(messages)
+						.filter(
+							proposal => !findMatchingMemory(memories, proposal.content),
+						);
 					if (proposals.length === 0) {
 						proposalStore.clear();
 						return infoMsg(
@@ -358,16 +391,13 @@ export function createMemoryCommand(
 						);
 					}
 
-					const memory = await summarizerService.acceptProposal(
+					const result = await summarizerService.acceptProposal(
 						proposal,
 						metadata.sessionId,
 					);
 					proposalStore.markAccepted(index);
 
-					return successMsg(
-						`Saved ${memory.category} memory: ${memory.content}`,
-						'memory-accept',
-					);
+					return savedMemoryMessage(result, 'Saved', 'memory-accept');
 				}
 
 				return errorMsg(USAGE, 'memory-error');

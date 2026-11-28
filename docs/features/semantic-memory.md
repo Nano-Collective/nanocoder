@@ -12,7 +12,7 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 
 ## Commands
 
-- `/memory add [--category <name>] <content>` - Save a memory directly (`/remember` still works as an alias). `-c` is a short form of `--category`.
+- `/memory add [--category <name>] <content>` - Save a memory directly (`/remember` still works as an alias). `-c` is a short form of `--category`. Saving text that matches an existing memory refreshes it instead of adding a copy.
 - `/memory list` - List all saved memories with their short IDs and categories. `/memory ls` is an alias, and a bare `/memory` with no subcommand does the same thing.
 - `/memory delete <id>` - Delete a specific memory. `/memory rm` is an alias.
 - `/memory clear` - Delete all memories for the current project.
@@ -38,6 +38,8 @@ Memory creation is always manual and explicit. Nothing is ever saved automatical
 ## Categories
 
 Memories are grouped into: `architecture`, `bugFix`, `refactor`, `todo`, `codingStyle`, or `project` (the default, for anything that doesn't match a more specific category). `/memory add` infers a category automatically from the content unless you pass `--category`. `--category` is not checked against this list: any other name is saved as given, and its words still count as category matches during recall.
+
+Saving a memory whose content matches an existing one keeps the original id and wording, but refreshes its timestamp and git snapshot so staleness warnings reflect the current files. An explicit `--category` is applied to that existing entry; an inferred/default category is not. Both `/memory add` and `/memory accept` report when an entry was already saved and whether it was updated. Whitespace is ignored when comparing content, but case is preserved, so a corrected identifier such as `API_KEY` is still a distinct memory.
 
 ## Recall
 
@@ -85,7 +87,7 @@ Values outside the supported range are clamped rather than rejected. On a small 
 
 `/memory propose` looks back through the recent conversation for lines that read like durable facts (matched against the category keywords above) and prints them with their source (`explicit-user` or `conversation-inferred`) and a short evidence snippet. Nothing is saved until you run `/memory accept <n>`.
 
-The scan covers the last 40 messages and prints at most 20 proposals, so a long session doesn't produce a list too large to review. Proposals without warnings are listed first. The printed numbering is fixed for as long as that list stands: accepting one proposal does not renumber the others, and accepting the same number twice is refused rather than repeated. Running `/clear` discards the list, since its evidence refers to a conversation you can no longer see.
+The scan covers the last 40 messages and prints at most 20 proposals, so a long session doesn't produce a list too large to review. Injected `<turn-context>` blocks (recalled memories and matched skills) are stripped before scanning, and proposals whose content already matches a saved memory are skipped. Proposals without warnings are listed first. The printed numbering is fixed for as long as that list stands: accepting one proposal does not renumber the others, and accepting the same number twice is refused rather than repeated. Running `/clear` discards the list, since its evidence refers to a conversation you can no longer see.
 
 ### Warnings
 

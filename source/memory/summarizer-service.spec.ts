@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'ava';
 import type {Message} from '@/types/core';
+import {appendTurnContext} from '@/utils/turn-context';
 import {SemanticMemoryManager} from './semantic-memory-manager.js';
 import {
 	inferMemoryCategory,
@@ -25,7 +26,7 @@ test('SummarizerService stores a manual memory', async t => {
 	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
 	const service = new SummarizerService(manager, () => true);
 
-	const memory = await service.remember({
+	const {memory} = await service.remember({
 		content: '  Use the existing provider abstraction for model changes.  ',
 		sourceSessionId: 'session-1',
 	});
@@ -59,12 +60,52 @@ test('SummarizerService uses explicit camelCase category', async t => {
 		() => true,
 	);
 
-	const memory = await service.remember({
+	const {memory} = await service.remember({
 		content: 'Keep generated files out of review unless needed.',
 		category: 'coding style',
 	});
 
 	t.is(memory.category, 'codingStyle');
+});
+
+test('SummarizerService applies an explicit category when refreshing an existing memory', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+	const content = 'Use the existing provider abstraction for model changes.';
+
+	const {memory: first} = await service.remember({content});
+	const result = await service.remember({
+		content: `  ${content}  `,
+		category: 'todo',
+	});
+
+	t.false(result.created);
+	t.true(result.updated);
+	t.is(result.memory.id, first.id);
+	t.is(result.memory.category, 'todo');
+});
+
+test('SummarizerService does not replace an explicit category with an inferred one', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+	const content = 'Keep generated files out of review.';
+
+	const {memory: first} = await service.remember({
+		content,
+		category: 'todo',
+	});
+	const {memory: refreshed} = await service.remember({
+		content: `  ${content}  `,
+	});
+
+	t.is(refreshed.id, first.id);
+	t.is(refreshed.category, 'todo');
 });
 
 test('inferMemoryCategory maps durable facts to stable categories', t => {
@@ -379,7 +420,7 @@ test('SummarizerService acceptProposal saves a proposal without re-deriving its 
 	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
 	const service = new SummarizerService(manager, () => true);
 
-	const memory = await service.acceptProposal(
+	const {memory} = await service.acceptProposal(
 		{content: 'Fixed the queued input regression by restoring drafts.', category: 'bugFix'},
 		'session-1',
 	);
@@ -387,6 +428,46 @@ test('SummarizerService acceptProposal saves a proposal without re-deriving its 
 	t.is(memory.category, 'bugFix');
 	t.is(memory.sourceSessionId, 'session-1');
 	t.deepEqual(await manager.listMemories(), [memory]);
+});
+
+test('SummarizerService ignores recalled memories and skills in turn-context', t => {
+	const service = new SummarizerService();
+	const content = appendTurnContext('Refactor the storage adapter to fix the bug.', [
+		'## Available Skills\n- Use the existing provider abstraction for model changes.',
+		'## Project Context\n\n```\n- The storage layer uses an adapter per database backend.\n- Fixed the flaky login test by mocking the clock.\n```',
+	]);
+
+	t.deepEqual(service.proposeMemoriesFromMessages([{role: 'user', content}]), [
+		{
+			content: 'Refactor the storage adapter to fix the bug.',
+			category: 'bugFix',
+			sourceType: 'explicit-user',
+			evidence: {
+				userMessages: ['Refactor the storage adapter to fix the bug.'],
+				assistantMessages: [],
+			},
+			warnings: [],
+		},
+	] satisfies MemoryProposal[]);
+});
+
+test('SummarizerService does not save an accepted proposal twice', async t => {
+	const dir = await createTempDir();
+	const cwd = path.join(dir, 'repo');
+	await fs.mkdir(cwd);
+	const manager = new SemanticMemoryManager({memoryDir: dir, cwd});
+	const service = new SummarizerService(manager, () => true);
+	const proposal = {
+		content: 'Fixed the queued input regression by restoring drafts.',
+		category: 'bugFix',
+	};
+
+	const {memory: first} = await service.acceptProposal(proposal);
+	const {memory: second} = await service.acceptProposal(proposal);
+
+	t.is(second.id, first.id);
+	t.true(second.timestamp >= first.timestamp);
+	t.deepEqual(await manager.listMemories(), [second]);
 });
 
 // --- Reversal detector: the four variants the round-3 review found defeated,
