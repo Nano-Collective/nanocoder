@@ -41,6 +41,17 @@ export interface LSPInitResult {
 }
 
 /**
+ * Languages a discovered server may claim when some are already covered by a
+ * configured server. Exported for tests.
+ */
+export function uncoveredDiscoveredLanguages(
+	languages: string[],
+	covered: ReadonlySet<string>,
+): string[] {
+	return languages.filter(lang => !covered.has(lang));
+}
+
+/**
  * Restarts allowed per server after a crash. One recovers from a one-off death
  * (OOM, a killed process); a server that keeps dying is left down instead of
  * being restarted in a loop.
@@ -114,52 +125,37 @@ export class LSPManager extends EventEmitter {
 	 */
 	async initialize(config: LSPManagerConfig = {}): Promise<LSPInitResult[]> {
 		const results: LSPInitResult[] = [];
-		const serversToStart: LSPServerConfig[] = [];
+		const configured: LSPServerConfig[] = [];
+		const discovered: LSPServerConfig[] = [];
 		this.shuttingDown = false;
 
-		// Add custom servers first (they take priority)
 		if (config.servers) {
 			for (const server of config.servers) {
-				serversToStart.push({
+				configured.push({
 					...server,
 					rootUri: server.rootUri || this.rootUri,
 				});
 			}
 		}
 
-		// Auto-discover additional servers if enabled (default: true)
 		if (config.autoDiscover !== false) {
-			// Extract file path from rootUri for context-aware server discovery
 			const projectRoot = this.rootUri.startsWith('file://')
 				? fileURLToPath(this.rootUri)
 				: this.rootUri;
-			const discovered = await discoverLanguageServers(projectRoot);
-
-			// Only add discovered servers for languages not already covered
-			const coveredLanguages = new Set<string>();
-			for (const server of serversToStart) {
-				for (const lang of server.languages) {
-					coveredLanguages.add(lang);
+			const found = await discoverLanguageServers(projectRoot);
+			const configuredNames = new Set(configured.map(server => server.name));
+			for (const server of found) {
+				if (configuredNames.has(server.name)) {
+					continue;
 				}
-			}
-
-			for (const server of discovered) {
-				const hasNewLanguages = server.languages.some(
-					lang => !coveredLanguages.has(lang),
-				);
-				if (hasNewLanguages) {
-					serversToStart.push({
-						...server,
-						rootUri: this.rootUri,
-					});
-					for (const lang of server.languages) {
-						coveredLanguages.add(lang);
-					}
-				}
+				discovered.push({
+					...server,
+					rootUri: this.rootUri,
+				});
 			}
 		}
 
-		// Start all servers in parallel
+		const serversToStart = [...configured, ...discovered];
 		const startPromises = serversToStart.map(async serverConfig => {
 			const result = await this.startServer(serverConfig);
 			config.onProgress?.(result);
@@ -168,9 +164,51 @@ export class LSPManager extends EventEmitter {
 		});
 
 		await Promise.all(startPromises);
+		this.registerLanguageMappings(configured, discovered);
+
+		for (const result of results) {
+			if (result.success) continue;
+			const server = serversToStart.find(s => s.name === result.serverName);
+			if (!server) continue;
+			this.markUnavailable(
+				server.languages.filter(lang => !this.languageToServer.has(lang)),
+				`Language server "${server.name}" failed to start: ${result.error}`,
+			);
+		}
 
 		this.initialized = true;
 		return results;
+	}
+
+	private registerLanguageMappings(
+		configured: LSPServerConfig[],
+		discovered: LSPServerConfig[],
+	): void {
+		for (const server of configured) {
+			if (!this.clients.has(server.name)) continue;
+			for (const lang of server.languages) {
+				if (!this.languageToServer.has(lang)) {
+					this.languageToServer.set(lang, server.name);
+				}
+			}
+			this.markAvailable(
+				server.languages.filter(
+					lang => this.languageToServer.get(lang) === server.name,
+				),
+			);
+		}
+
+		for (const server of discovered) {
+			if (!this.clients.has(server.name)) continue;
+			const claimed = uncoveredDiscoveredLanguages(
+				server.languages,
+				new Set(this.languageToServer.keys()),
+			);
+			for (const lang of claimed) {
+				this.languageToServer.set(lang, server.name);
+			}
+			this.markAvailable(claimed);
+		}
 	}
 
 	/**
@@ -221,12 +259,7 @@ export class LSPManager extends EventEmitter {
 				);
 			}
 
-			// Store client and language mappings
 			this.clients.set(config.name, client);
-			for (const lang of config.languages) {
-				this.languageToServer.set(lang, config.name);
-			}
-			this.markAvailable(config.languages);
 
 			return {
 				serverName: config.name,
@@ -235,19 +268,26 @@ export class LSPManager extends EventEmitter {
 			};
 		} catch (error) {
 			const message = formatError(error);
-			// Say why later, when a diagnostics call for this file type would
-			// otherwise just report that no server exists for it. A language
-			// another server already covers is not unavailable.
-			this.markUnavailable(
-				config.languages.filter(lang => !this.languageToServer.has(lang)),
-				`Language server "${config.name}" failed to start: ${message}`,
-			);
 			return {
 				serverName: config.name,
 				success: false,
 				error: message,
 			};
 		}
+	}
+
+	private claimLanguagesForServer(
+		config: LSPServerConfig,
+		onlyFree: boolean,
+	): string[] {
+		const claimed: string[] = [];
+		for (const lang of config.languages) {
+			if (onlyFree && this.languageToServer.has(lang)) continue;
+			this.languageToServer.set(lang, config.name);
+			claimed.push(lang);
+		}
+		this.markAvailable(claimed);
+		return claimed;
 	}
 
 	/**
@@ -297,11 +337,11 @@ export class LSPManager extends EventEmitter {
 			return;
 		}
 		if (result.success) {
-			this.markAvailable(config.languages);
+			this.claimLanguagesForServer(config, true);
 			notifyInfo(`Language server "${config.name}" restarted.`);
 		} else {
 			this.markUnavailable(
-				config.languages,
+				config.languages.filter(lang => !this.languageToServer.has(lang)),
 				`Language server "${config.name}" crashed (${status}) and could not be restarted: ${result.error}`,
 			);
 			notifyError(

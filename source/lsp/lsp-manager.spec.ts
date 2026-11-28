@@ -1,4 +1,5 @@
 import {EventEmitter} from 'node:events';
+import {chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -9,7 +10,30 @@ import {
 	getLSPManager,
 	normalizeUri,
 	resetLSPManager,
+	uncoveredDiscoveredLanguages,
 } from './lsp-manager';
+
+const FAKE_LSP_SERVER = `
+let buf = '';
+const reply = (id, result) => {
+	const body = JSON.stringify({jsonrpc: '2.0', id, result});
+	process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\\r\\n\\r\\n' + body);
+};
+process.stdin.on('data', chunk => {
+	buf += chunk;
+	for (;;) {
+		const end = buf.indexOf('\\r\\n\\r\\n');
+		if (end === -1) return;
+		const len = Number(/Content-Length: (\\d+)/i.exec(buf.slice(0, end))[1]);
+		if (buf.length < end + 4 + len) return;
+		const msg = JSON.parse(buf.slice(end + 4, end + 4 + len));
+		buf = buf.slice(end + 4 + len);
+		if (msg.method === 'initialize') reply(msg.id, {capabilities: {}});
+		else if (msg.method === 'shutdown') reply(msg.id, null);
+		else if (msg.method === 'exit') process.exit(0);
+	}
+});
+`;
 
 console.log(`\nlsp-manager.spec.ts`);
 
@@ -576,3 +600,171 @@ test('normalizeUri - preserves non-file and unrepresentable URIs', t => {
 		'file://server/share/App.ts',
 	);
 });
+
+test('uncoveredDiscoveredLanguages - keeps only languages not already covered', t => {
+	const covered = new Set(['ts']);
+	t.deepEqual(
+		uncoveredDiscoveredLanguages(['ts', 'tsx', 'js', 'jsx'], covered),
+		['tsx', 'js', 'jsx'],
+	);
+	t.deepEqual(uncoveredDiscoveredLanguages(['ts'], covered), []);
+	t.deepEqual(uncoveredDiscoveredLanguages(['py'], covered), ['py']);
+});
+
+test.serial(
+	'initialize keeps configured ts and leaves remaining languages to discovery',
+	async t => {
+		const originalPath = process.env.PATH;
+		const originalPathExt = process.env.PATHEXT;
+		const fixtureDir = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-claim-'));
+		const binDirectory = join(fixtureDir, 'bin');
+		mkdirSync(binDirectory);
+		const script = join(fixtureDir, 'fake-lsp.js');
+		writeFileSync(script, FAKE_LSP_SERVER);
+		const discoveredBin = join(binDirectory, 'typescript-language-server');
+		writeFileSync(
+			discoveredBin,
+			`#!/bin/sh\nif [ "$1" = "--version" ]; then exit 0; fi\nexec "${process.execPath}" "${script}" "$@"\n`,
+			'utf-8',
+		);
+		chmodSync(discoveredBin, 0o755);
+
+		const manager = new LSPManager({
+			rootUri: pathToFileURL(fixtureDir).href,
+		});
+
+		try {
+			process.env.PATH = binDirectory;
+			process.env.PATHEXT = originalPathExt;
+
+			await manager.initialize({
+				autoDiscover: true,
+				servers: [
+					{
+						name: 'configured-ts',
+						command: process.execPath,
+						args: [script],
+						languages: ['ts'],
+					},
+				],
+			});
+
+			const status = manager.getStatus();
+			const configured = status.servers.find(s => s.name === 'configured-ts');
+			const discovered = status.servers.find(
+				s => s.name === 'typescript-language-server',
+			);
+
+			t.truthy(configured);
+			t.truthy(discovered);
+			t.deepEqual(configured!.languages.sort(), ['ts']);
+			t.false(discovered!.languages.includes('ts'));
+			t.true(discovered!.languages.includes('tsx'));
+			t.true(discovered!.languages.includes('js'));
+		} finally {
+			await manager.shutdown();
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+			if (originalPathExt === undefined) delete process.env.PATHEXT;
+			else process.env.PATHEXT = originalPathExt;
+			rmSync(fixtureDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'initialize lets discovery claim ts when the configured server fails',
+	async t => {
+		const originalPath = process.env.PATH;
+		const originalPathExt = process.env.PATHEXT;
+		const fixtureDir = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-fallback-'));
+		const binDirectory = join(fixtureDir, 'bin');
+		mkdirSync(binDirectory);
+		const script = join(fixtureDir, 'fake-lsp.js');
+		writeFileSync(script, FAKE_LSP_SERVER);
+		const discoveredBin = join(binDirectory, 'typescript-language-server');
+		writeFileSync(
+			discoveredBin,
+			`#!/bin/sh\nif [ "$1" = "--version" ]; then exit 0; fi\nexec "${process.execPath}" "${script}" "$@"\n`,
+			'utf-8',
+		);
+		chmodSync(discoveredBin, 0o755);
+
+		const manager = new LSPManager({
+			rootUri: pathToFileURL(fixtureDir).href,
+		});
+
+		try {
+			process.env.PATH = binDirectory;
+			process.env.PATHEXT = originalPathExt;
+
+			await manager.initialize({
+				autoDiscover: true,
+				servers: [
+					{
+						name: 'configured-ts',
+						command: process.execPath,
+						args: ['-e', 'process.exit(1)'],
+						languages: ['ts'],
+					},
+				],
+			});
+
+			const status = manager.getStatus();
+			t.falsy(status.servers.find(s => s.name === 'configured-ts'));
+			const discovered = status.servers.find(
+				s => s.name === 'typescript-language-server',
+			);
+			t.truthy(discovered);
+			t.true(discovered!.languages.includes('ts'));
+		} finally {
+			await manager.shutdown();
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+			if (originalPathExt === undefined) delete process.env.PATHEXT;
+			else process.env.PATHEXT = originalPathExt;
+			rmSync(fixtureDir, {recursive: true, force: true});
+		}
+	},
+);
+
+test.serial(
+	'initialize registers overlapping configured languages in config order',
+	async t => {
+		const fixtureDir = mkdtempSync(join(tmpdir(), 'nanocoder-lsp-order-'));
+		const script = join(fixtureDir, 'fake-lsp.js');
+		writeFileSync(script, FAKE_LSP_SERVER);
+		const manager = new LSPManager({
+			rootUri: pathToFileURL(fixtureDir).href,
+		});
+
+		try {
+			await manager.initialize({
+				autoDiscover: false,
+				servers: [
+					{
+						name: 'first-ts',
+						command: process.execPath,
+						args: [script],
+						languages: ['ts'],
+					},
+					{
+						name: 'second-ts',
+						command: process.execPath,
+						args: [script],
+						languages: ['ts', 'tsx'],
+					},
+				],
+			});
+
+			const status = manager.getStatus();
+			const first = status.servers.find(s => s.name === 'first-ts');
+			const second = status.servers.find(s => s.name === 'second-ts');
+			t.deepEqual(first!.languages.sort(), ['ts']);
+			t.deepEqual(second!.languages.sort(), ['tsx']);
+		} finally {
+			await manager.shutdown();
+			rmSync(fixtureDir, {recursive: true, force: true});
+		}
+	},
+);
