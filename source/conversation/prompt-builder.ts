@@ -1,4 +1,4 @@
-import {existsSync, readFileSync} from 'fs';
+import {readFileSync} from 'fs';
 import {homedir, platform, release} from 'os';
 import {basename, dirname, isAbsolute, join, normalize, resolve} from 'path';
 import {fileURLToPath} from 'url';
@@ -16,6 +16,10 @@ import {getLogger} from '@/utils/logging';
 import {notifyWarning} from '@/utils/message-queue-core';
 import {expandAgentsMdImports} from './agents-md-imports.js';
 import {getGitContextSection} from './git-context';
+import {
+	loadProjectInstructionFile,
+	shouldIncludeProjectInstructions,
+} from './instruction-files.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -123,25 +127,19 @@ const reportedImportWarnings = new Set<string>();
 
 // The project root is the launch directory everywhere except inside an ACP
 // session's scope, where it is the `cwd` the client named for the session.
-function appendAgentsMd(prompt: string): string {
+function appendProjectInstructions(prompt: string): string {
 	const projectRoot = getProjectRoot();
-	const agentsPath = join(projectRoot, 'AGENTS.md');
-	if (existsSync(agentsPath)) {
-		try {
-			const raw = readFileSync(agentsPath, 'utf-8');
-			// `@path` lines are inlined here, so the model never receives a
-			// reference it cannot open by itself.
-			const {content, warnings} = expandAgentsMdImports(raw, {
-				filePath: agentsPath,
-				projectRoot,
-			});
-			reportImportWarnings(warnings, projectRoot);
-			return `${prompt}\n\nAdditional Context...\n\n${content}`;
-		} catch {
-			// Silently skip if unreadable
-		}
-	}
-	return prompt;
+	const file = loadProjectInstructionFile(projectRoot);
+	if (!file) return prompt;
+
+	// `@path` lines are inlined for every instruction file, including the
+	// fallbacks: the model never receives a reference it cannot open by itself.
+	const {content, warnings} = expandAgentsMdImports(file.content, {
+		filePath: file.path,
+		projectRoot,
+	});
+	reportImportWarnings(warnings, projectRoot);
+	return `${prompt}\n\nAdditional Context...\n\n${content}`;
 }
 
 function reportImportWarnings(warnings: string[], projectRoot: string): void {
@@ -396,12 +394,11 @@ ${getSubagentDescriptions()}`;
 		sections.push(getGitContextSection());
 	}
 
-	// Compose and (optionally) append AGENTS.md.
-	// Nano omits AGENTS.md by default; users can override via tune.includeAgentsMd.
+	// Compose and (optionally) append the project instruction file.
+	// Nano omits it by default; users can override via tune.includeAgentsMd.
 	let prompt = sections.filter(Boolean).join('\n\n');
-	const includeAgentsMd = tune.includeAgentsMd ?? (nano ? false : true);
-	if (includeAgentsMd) {
-		prompt = appendAgentsMd(prompt);
+	if (shouldIncludeProjectInstructions(tune, model)) {
+		prompt = appendProjectInstructions(prompt);
 	}
 
 	// Append-mode user override (replace mode is handled at the top of the function).

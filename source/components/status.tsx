@@ -1,15 +1,19 @@
-import {existsSync} from 'fs';
 import {Box, Text} from 'ink';
 import {memo} from 'react';
 
 import {TitledBoxWithPreferences} from '@/components/ui/titled-box';
-import {confDirMap} from '@/config/index';
+import {confDirMap, getAppConfig} from '@/config/index';
 import {getThemeColors, themes} from '@/config/themes';
 import {
 	PATH_LENGTH_NARROW_TERMINAL,
 	PATH_LENGTH_NORMAL_TERMINAL,
 } from '@/constants';
+import {
+	findProjectInstructionFile,
+	shouldIncludeProjectInstructions,
+} from '@/conversation/instruction-files';
 import {useResponsiveTerminal} from '@/hooks/useTerminalWidth';
+import {getProjectRoot} from '@/services/session-cwd';
 import {formatGitStatusSummary, type GitStatusSummary} from '@/tools/git/utils';
 import type {LSPConnectionStatus, MCPConnectionStatus} from '@/types/core';
 import type {ThemePreset} from '@/types/ui';
@@ -75,8 +79,16 @@ export default memo(function Status({
 	const {boxWidth, isNarrow, truncatePath} = useResponsiveTerminal();
 	const colors = getThemeColors(theme);
 
-	// Check for AGENTS.md synchronously if not provided
-	const hasAgentsMd = agentsMdLoaded ?? existsSync(`${cwd}/AGENTS.md`);
+	// Use the same resolver and gate as the prompt builder so the name shown
+	// here is the file whose rules actually reached the model.
+	const instructionFile = findProjectInstructionFile(getProjectRoot());
+	const instructionFileName = instructionFile?.name ?? 'AGENTS.md';
+	const instructionsEnabled = shouldIncludeProjectInstructions(
+		getAppConfig().tune,
+		model,
+	);
+	const hasAgentsMd =
+		instructionsEnabled && (agentsMdLoaded ?? Boolean(instructionFile));
 
 	// Connection status calculations
 	const mcpStatus = mcpServersStatus || [];
@@ -138,7 +150,7 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							✓ AGENTS.md
+							✓ {instructionFileName}
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>
@@ -249,7 +261,7 @@ export default memo(function Status({
 					)}
 					{hasAgentsMd ? (
 						<Text color={colors.secondary} italic>
-							<Text>↳ Using AGENTS.md. Project initialized</Text>
+							<Text>↳ Using {instructionFileName}. Project initialized</Text>
 						</Text>
 					) : (
 						<Text color={colors.secondary} italic>

@@ -50,6 +50,7 @@ import {
 	loadDefaultProfileName,
 	resolveActiveProfile,
 } from '@/config/profile';
+import {DEFAULT_INSTRUCTION_FILES} from '@/types/config';
 import {FIREWALL_DEFAULTS, resolveFirewallConfig} from '@/types/firewall';
 import {stripUtf8Bom} from '@/utils/strip-utf8-bom';
 import {isObject} from '@/utils/type-helpers';
@@ -446,6 +447,11 @@ interface BlockSpec {
 	env?: {variable: string; leaf: string};
 	/** How deep to flatten. Defaults to 2 (block field, plus one nesting). */
 	depth?: number;
+	/**
+	 * Layers allowed to supply the effective value. Omitted layers still show
+	 * up under `shadowed` so diagnostics do not hide a file the loader ignores.
+	 */
+	layers?: readonly ConfigLayerId[];
 }
 
 function blockSpecs(cwd?: string): BlockSpec[] {
@@ -523,6 +529,16 @@ function blockSpecs(cwd?: string): BlockSpec[] {
 			effective: config.systemPrompt,
 		},
 		{
+			path: ['nanocoder', 'instructionFiles'],
+			file: agents,
+			// An unset value resolves to the same fallback list the prompt
+			// builder uses, so `config show` never reports a phantom empty list.
+			effective: config.instructionFiles ?? DEFAULT_INSTRUCTION_FILES,
+			leaf: true,
+			// Security: only the user-level file may choose prompt instructions.
+			layers: ['global'],
+		},
+		{
 			path: ['nanocoder', 'modeProviders'],
 			file: agents,
 			effective: config.modeProviders,
@@ -589,12 +605,21 @@ function blockSpecs(cwd?: string): BlockSpec[] {
 	];
 }
 
+/** Raw layers that can actually supply this block's value. */
+function candidateLayers(spec: BlockSpec, layers: RawLayer[]): RawLayer[] {
+	return layers.filter(
+		layer =>
+			layer.file === spec.file &&
+			(spec.layers === undefined || spec.layers.includes(layer.layer)),
+	);
+}
+
 /** Highest-precedence raw layer that contains the block, if any. */
 function winningLayer(
 	spec: BlockSpec,
 	layers: RawLayer[],
 ): RawLayer | undefined {
-	const candidates = layers.filter(l => l.file === spec.file);
+	const candidates = candidateLayers(spec, layers);
 	for (let i = candidates.length - 1; i >= 0; i--) {
 		const layer = candidates[i] as RawLayer;
 		if (hasAt(layer.data, spec.path)) return layer;
@@ -608,10 +633,19 @@ function resolveBlockEntries(
 ): EffectiveConfigEntry[] {
 	const blockKey = spec.path.join('.');
 	const winner = winningLayer(spec, layers);
-	const candidates = layers.filter(l => l.file === spec.file);
+	const candidates = candidateLayers(spec, layers);
 	const losers = candidates
 		.filter(l => hasAt(l.data, spec.path) && l !== winner)
 		.reverse();
+	const ignored =
+		spec.layers === undefined
+			? []
+			: layers.filter(
+					layer =>
+						layer.file === spec.file &&
+						!spec.layers?.includes(layer.layer) &&
+						hasAt(layer.data, spec.path),
+				);
 
 	const envRaw = spec.env ? process.env[spec.env.variable] : undefined;
 	const envActive =
@@ -697,6 +731,7 @@ function resolveBlockEntries(
 		// built-in default is what runs, and every losing file's copy of the
 		// field is ignored — captured as shadowed either way.
 		for (const loser of losers) pushRaw(loser);
+		for (const ignoredLayer of ignored) pushRaw(ignoredLayer);
 
 		const {value, redacted} = redactValue(leaf.value, keyHint);
 

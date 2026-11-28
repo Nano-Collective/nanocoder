@@ -401,6 +401,12 @@ export interface DiskNanocoderConfig {
 	/** Custom system prompt — replaces or extends the built-in prompt. */
 	systemPrompt?: SystemPromptConfig;
 	/**
+	 * Project instruction filenames tried after AGENTS.md, in priority order.
+	 * Read only from the user-level config so a cloned project cannot redirect
+	 * which of its files are included in the system prompt.
+	 */
+	instructionFiles?: string[];
+	/**
 	 * Shell commands run at fixed points in the agent loop, keyed by lifecycle
 	 * event. A project-local file can set these, so they carry the same
 	 * code-execution weight as project MCP servers (`.mcp.json`) and are
@@ -518,6 +524,10 @@ export interface AppConfig {
 
 	// Custom system prompt — replaces or extends the built-in prompt
 	systemPrompt?: SystemPromptConfig;
+
+	// Project instruction filenames tried after AGENTS.md, in priority order.
+	// User-level config only; profiles cannot redirect prompt instructions.
+	instructionFiles?: string[];
 
 	// Lifecycle hooks — shell commands run at fixed points in the agent loop.
 	// Project-local config, so it carries the same code-execution weight as
@@ -791,6 +801,17 @@ export const TUNE_DEFAULTS: TuneConfig = {
 	toolProfile: 'auto',
 	aggressiveCompact: false,
 };
+
+/**
+ * Fallback project instruction filenames tried after AGENTS.md. Kept here so
+ * both the prompt resolver and `config show` report the same built-in list.
+ */
+export const DEFAULT_INSTRUCTION_FILES: readonly string[] = [
+	'CLAUDE.md',
+	'GEMINI.md',
+	'.github/copilot-instructions.md',
+	'.cursorrules',
+];
 
 export interface VoiceConfig {
 	enabled: boolean;
