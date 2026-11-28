@@ -30,6 +30,13 @@ test.before(async () => {
 		'import React from "react";\n\nexport function App() {\n  return <div>Hello</div>;\n}',
 		'utf-8',
 	);
+
+	await mkdir(join(testDir, 'components'), {recursive: true});
+	await writeFile(
+		join(testDir, 'components', 'Button.tsx'),
+		'export const Button = 1;',
+		'utf-8',
+	);
 });
 
 test.after.always(async () => {
@@ -59,6 +66,29 @@ test('creates placeholder for existing file', async t => {
 	const placeholder = Object.values(result!.placeholderContent)[0];
 	t.is(placeholder.type, PlaceholderType.FILE);
 	t.true(placeholder.content.includes('Line 1'));
+});
+
+test('creates placeholder for existing directory', async t => {
+	const dirPath = `${join(testDir, 'components').replace(/\\/g, '/')}/`;
+	const result = await handleFileMention(
+		dirPath,
+		`Check @${dirPath}`,
+		{},
+		`@${dirPath}`,
+	);
+
+	t.truthy(result);
+	t.is(result!.displayValue, `Check [@${dirPath}]`);
+	t.is(Object.keys(result!.placeholderContent).length, 1);
+
+	const placeholder = Object.values(result!.placeholderContent)[0];
+	t.is(placeholder.type, PlaceholderType.FILE);
+	if (placeholder.type === PlaceholderType.FILE) {
+		t.true(placeholder.isDirectory);
+		t.false(placeholder.truncated);
+	}
+	t.true(placeholder.content.includes('Directory:'));
+	t.true(placeholder.content.includes('Button.tsx'));
 });
 
 test('creates placeholder with line range', async t => {

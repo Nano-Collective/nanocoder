@@ -4,54 +4,78 @@ import {walkProjectEntries} from '../utils/fs/file-search';
 import {fuzzyScoreFilePath} from '../utils/fuzzy-matching';
 import {getLogger} from '../utils/logging';
 
-interface FileCompletion {
+export interface FileCompletion {
 	path: string; // Relative path from cwd
 	displayPath: string; // Shortened for display
 	score: number; // Fuzzy match score (higher = better match)
 	isDirectory: boolean;
 }
 
-// Simple cache for file list
-interface FileListCache {
-	files: string[];
+export interface ProjectEntryItem {
+	path: string;
+	isDirectory: boolean;
+}
+
+// Simple cache for entries list
+interface EntriesCache {
+	entries: ProjectEntryItem[];
 	timestamp: number;
 }
 
-let fileListCache: FileListCache | null = null;
+let entriesCache: EntriesCache | null = null;
+
+/**
+ * Get list of all entries (files and directories) in the project (respecting gitignore)
+ */
+export async function getAllEntries(cwd: string): Promise<ProjectEntryItem[]> {
+	// Check cache
+	const now = Date.now();
+	if (entriesCache && now - entriesCache.timestamp < CACHE_FILE_LIST_TTL_MS) {
+		return entriesCache.entries;
+	}
+
+	try {
+		const allEntries: ProjectEntryItem[] = [];
+		await walkProjectEntries(
+			cwd,
+			undefined,
+			entry => {
+				const normalized = entry.relativePath.replace(/\\/g, '/');
+				if (entry.isDirectory) {
+					allEntries.push({
+						path: normalized.endsWith('/') ? normalized : `${normalized}/`,
+						isDirectory: true,
+					});
+				} else {
+					allEntries.push({
+						path: normalized,
+						isDirectory: false,
+					});
+				}
+				return false;
+			},
+			{includeDirectories: true},
+		);
+
+		entriesCache = {
+			entries: allEntries,
+			timestamp: now,
+		};
+
+		return allEntries;
+	} catch (error) {
+		const logger = getLogger();
+		logger.error({error: formatError(error)}, 'Failed to list entries');
+		return [];
+	}
+}
 
 /**
  * Get list of all files in the project (respecting gitignore)
  */
 export async function getAllFiles(cwd: string): Promise<string[]> {
-	// Check cache
-	const now = Date.now();
-	if (fileListCache && now - fileListCache.timestamp < CACHE_FILE_LIST_TTL_MS) {
-		return fileListCache.files;
-	}
-
-	try {
-		const allFiles: string[] = [];
-		await walkProjectEntries(
-			cwd,
-			undefined,
-			entry => {
-				allFiles.push(entry.relativePath.replace(/\\/g, '/'));
-				return false;
-			},
-			{includeDirectories: false},
-		);
-
-		fileListCache = {
-			files: allFiles,
-			timestamp: now,
-		};
-
-		return allFiles;
-	} catch (error) {
-		const logger = getLogger();
-		logger.error({error: formatError(error)}, 'Failed to list files');
-		return [];
-	}
+	const entries = await getAllEntries(cwd);
+	return entries.filter(e => !e.isDirectory).map(e => e.path);
 }
 
 /**
@@ -110,23 +134,24 @@ export function getCurrentFileMention(
 }
 
 /**
- * Get file completions for a partial path
+ * Get file and directory completions for a partial path
  */
 export async function getFileCompletions(
 	partialPath: string,
 	cwd: string,
 	maxResults: number = 20,
 ): Promise<FileCompletion[]> {
-	// Get all files
-	const allFiles = await getAllFiles(cwd);
+	// Get all entries (files and directories)
+	const allEntries = await getAllEntries(cwd);
 
-	// Score each file
-	const scoredFiles = allFiles
-		.map(file => ({
-			path: file,
-			displayPath: file.length > 50 ? '...' + file.slice(-47) : file,
-			score: fuzzyScoreFilePath(file, partialPath),
-			isDirectory: false, // We're only listing files, not directories
+	// Score each entry
+	const scoredEntries = allEntries
+		.map(entry => ({
+			path: entry.path,
+			displayPath:
+				entry.path.length > 50 ? '...' + entry.path.slice(-47) : entry.path,
+			score: fuzzyScoreFilePath(entry.path, partialPath),
+			isDirectory: entry.isDirectory,
 		}))
 		.filter(f => f.score > 0) // Only include matches
 		.sort((a, b) => {
@@ -134,17 +159,21 @@ export async function getFileCompletions(
 			if (b.score !== a.score) {
 				return b.score - a.score;
 			}
-			// If scores are equal, sort alphabetically
+			// When scores are tied, prefer files over directories
+			if (a.isDirectory !== b.isDirectory) {
+				return a.isDirectory ? 1 : -1;
+			}
+			// If scores and types are equal, sort alphabetically
 			return a.path.localeCompare(b.path);
 		})
 		.slice(0, maxResults); // Limit results
 
-	return scoredFiles;
+	return scoredEntries;
 }
 
 /**
  * Clear the file list cache (useful for testing or when files change)
  */
 export function clearFileListCache(): void {
-	fileListCache = null;
+	entriesCache = null;
 }

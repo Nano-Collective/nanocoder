@@ -1,7 +1,9 @@
 import {readFile, stat} from 'node:fs/promises';
 import {extname, resolve} from 'node:path';
 import {BINARY_FILE_EXTENSIONS, MAX_FILE_TAG_SIZE_BYTES} from '@/constants.js';
+import {getProjectRoot} from '@/services/session-cwd';
 import {formatError} from '@/utils/error-formatter';
+import {walkDirectory} from '@/utils/fs/directory-walker';
 import {estimateTokens} from '@/utils/token-calculator';
 
 interface FileContentResult {
@@ -15,6 +17,8 @@ interface FileContentResult {
 		lineCount: number;
 		lineRange?: {start: number; end?: number};
 		tokens: number;
+		isDirectory?: boolean;
+		truncated?: boolean;
 	};
 }
 
@@ -31,6 +35,10 @@ export async function loadFileContent(
 
 		// Check if file exists and get stats
 		const fileStats = await stat(absPath);
+
+		if (fileStats.isDirectory()) {
+			return loadDirectoryContent(filePath, absPath);
+		}
 
 		// Check if it's a file (not directory)
 		if (!fileStats.isFile()) {
@@ -189,6 +197,76 @@ export async function loadFileContent(
  */
 function formatFileContent(lines: string[], filePath: string): string {
 	return `Path: ${filePath}\n\n${lines.join('\n')}`;
+}
+
+const MAX_DIRECTORY_ENTRIES = 200;
+const MAX_DIRECTORY_DEPTH = 3;
+
+async function loadDirectoryContent(
+	filePath: string,
+	absPath: string,
+): Promise<FileContentResult> {
+	try {
+		const root = getProjectRoot();
+		const {entries, hitCap} = await walkDirectory({
+			root,
+			dirPath: absPath,
+			recursive: true,
+			maxDepth: MAX_DIRECTORY_DEPTH,
+			showHiddenFiles: false,
+			showSizes: false,
+			maxEntries: MAX_DIRECTORY_ENTRIES,
+		});
+
+		const normalizedDisplayPath = filePath.replace(/\\/g, '/');
+		const displayPath = normalizedDisplayPath.endsWith('/')
+			? normalizedDisplayPath
+			: `${normalizedDisplayPath}/`;
+
+		let body = '';
+		if (entries.length === 0) {
+			body = '(empty directory)';
+		} else {
+			body = entries
+				.map(e =>
+					e.type === 'directory' ? `${e.relativePath}/` : e.relativePath,
+				)
+				.join('\n');
+			if (hitCap) {
+				body += `\n\n[Showing first ${MAX_DIRECTORY_ENTRIES} entries up to depth ${MAX_DIRECTORY_DEPTH}]`;
+			}
+		}
+
+		const formattedContent = `Directory: ${displayPath}\n\n${body}`;
+		const tokens = estimateTokens(formattedContent);
+
+		return {
+			success: true,
+			content: formattedContent,
+			metadata: {
+				path: filePath,
+				absolutePath: absPath,
+				size: formattedContent.length,
+				lineCount: formattedContent.split('\n').length,
+				tokens,
+				isDirectory: true,
+				truncated: hitCap,
+			},
+		};
+	} catch (error) {
+		return {
+			success: false,
+			error: formatError(error),
+			metadata: {
+				path: filePath,
+				absolutePath: absPath,
+				size: 0,
+				lineCount: 0,
+				tokens: 0,
+				isDirectory: true,
+			},
+		};
+	}
 }
 
 function formatBytes(bytes: number): string {

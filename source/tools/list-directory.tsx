@@ -1,5 +1,3 @@
-import {lstat, readdir} from 'node:fs/promises';
-import {join, relative} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
 import ToolMessage from '@/components/tool-message';
@@ -8,7 +6,7 @@ import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {addNestedGitignore, loadGitignore} from '@/utils/fs/gitignore-loader';
+import {walkDirectory} from '@/utils/fs/directory-walker';
 import {isValidFilePath, resolveFilePath} from '@/utils/fs/path-validation';
 import {estimateTokens} from '@/utils/token-calculator';
 
@@ -19,13 +17,6 @@ interface ListDirectoryArgs {
 	tree?: boolean;
 	showHiddenFiles?: boolean;
 	showSizes?: boolean;
-}
-
-interface DirectoryEntry {
-	name: string;
-	relativePath: string;
-	type: 'file' | 'directory' | 'symlink';
-	size?: number;
 }
 
 const executeListDirectory = async (
@@ -48,128 +39,16 @@ const executeListDirectory = async (
 	}
 
 	const resolvedPath = resolveFilePath(dirPath, cwd, root);
-	// Dotfiles stay hidden unless the caller explicitly asked for a hidden
-	// directory (`.github`, `./.config`). Match the project-relative path, not
-	// the raw argument: `'.'.startsWith('.')` is true and used to leak every
-	// dotfile at the project root (#1237), and an absolute path would otherwise
-	// pick up hidden *ancestors* of the project itself (`~/.local/share/proj`).
-	const listingHiddenDir = /(^|[/\\])\.[^./\\]/.test(
-		relative(root, resolvedPath),
-	);
-	// Load from the project root so root-level rules still apply after a `cd`
-	// into a subdir; entries are matched root-relative below.
-	const ig = loadGitignore(root);
-
-	// A .gitignore below the root hides files too, as it does for git and for
-	// find_files. The walk below reads the one in each directory it enters;
-	// the directories between the root and the listed one are read here, top
-	// down, so their rules are in place first.
-	const listedSegments = relative(root, resolvedPath)
-		.split(/[/\\]/)
-		.filter(Boolean);
-	const isInsideRoot = listedSegments[0] !== '..';
-	if (isInsideRoot) {
-		for (let depth = 1; depth < listedSegments.length; depth++) {
-			const ancestor = listedSegments.slice(0, depth);
-			await addNestedGitignore(ig, join(root, ...ancestor), ancestor.join('/'));
-		}
-	}
 
 	try {
-		const entries: DirectoryEntry[] = [];
-
-		const walkDirectory = async (
-			currentPath: string,
-			relativeTo: string,
-			depth: number,
-		): Promise<void> => {
-			if (depth > maxDepth) return;
-
-			try {
-				if (isInsideRoot) {
-					await addNestedGitignore(
-						ig,
-						currentPath,
-						relative(root, currentPath).replace(/\\/g, '/'),
-					);
-				}
-				const items = await readdir(currentPath, {withFileTypes: true});
-
-				for (const item of items) {
-					// Skip hidden files unless showHiddenFiles is true
-					if (
-						!showHiddenFiles &&
-						item.name.startsWith('.') &&
-						!listingHiddenDir
-					) {
-						continue;
-					}
-
-					const fullPath = join(currentPath, item.name);
-
-					// Check if this item should be ignored using gitignore patterns.
-					// Match root-relative so the project-root .gitignore applies. A
-					// directory is tested with its trailing slash too: a
-					// directory-only pattern (`node_modules/`, `dist/`) matches only
-					// that form, so without it the ignored folder still listed and
-					// then read back as empty.
-					const ignorePath = relative(root, fullPath);
-					if (
-						ig.ignores(ignorePath) ||
-						(item.isDirectory() && ig.ignores(`${ignorePath}/`))
-					) {
-						continue;
-					}
-
-					let type: 'file' | 'directory' | 'symlink' = 'file';
-					if (item.isSymbolicLink()) {
-						type = 'symlink';
-					} else if (item.isDirectory()) {
-						type = 'directory';
-					}
-
-					const relativePath = join(relativeTo, item.name);
-
-					// Only get stats for files (to get size), and only when sizes
-					// were requested — lstat is a syscall per file, not worth
-					// paying for on every listing.
-					let size: number | undefined;
-					if (type === 'file' && showSizes) {
-						try {
-							const stats = await lstat(fullPath);
-							size = stats.size;
-						} catch {
-							// Skip files we can't stat
-							size = undefined;
-						}
-					}
-
-					entries.push({
-						name: item.name,
-						relativePath,
-						type,
-						size,
-					});
-
-					// Recurse into directories if enabled
-					if (recursive && item.isDirectory() && depth < maxDepth) {
-						await walkDirectory(fullPath, relativePath, depth + 1);
-					}
-				}
-			} catch (error: unknown) {
-				if (
-					error instanceof Error &&
-					'code' in error &&
-					error.code === 'EACCES'
-				) {
-					// Skip directories we can't read
-					return;
-				}
-				throw error;
-			}
-		};
-
-		await walkDirectory(resolvedPath, '', 0);
+		const {entries} = await walkDirectory({
+			root,
+			dirPath: resolvedPath,
+			recursive,
+			maxDepth,
+			showHiddenFiles,
+			showSizes,
+		});
 
 		if (entries.length === 0) {
 			return `Directory "${dirPath}" is empty`;

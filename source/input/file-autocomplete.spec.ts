@@ -1,7 +1,12 @@
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import test from 'ava';
 import {
 	clearFileListCache,
+	getAllEntries,
 	getCurrentFileMention,
+	getFileCompletions,
 } from './file-autocomplete.js';
 import {fuzzyScoreFilePath} from '../utils/fuzzy-matching.js';
 
@@ -81,6 +86,27 @@ test('fuzzy score: consecutive matches get bonus', t => {
 	// "btn" requires skipping characters
 	const nonConsecutive = fuzzyScoreFilePath('Button.tsx', 'btn');
 	t.true(consecutive > nonConsecutive);
+});
+
+// Test fuzzy score on directory paths
+test('fuzzy score: directory exact match with or without trailing slash', t => {
+	t.is(fuzzyScoreFilePath('src/components/', 'src/components/'), 1000);
+	t.is(fuzzyScoreFilePath('src/components/', 'src/components'), 1000);
+	t.is(fuzzyScoreFilePath('src/components', 'src/components/'), 1000);
+});
+
+test('fuzzy score: directory dirname exact match', t => {
+	t.is(fuzzyScoreFilePath('src/components/', 'components'), 900);
+	t.is(fuzzyScoreFilePath('src/components/', 'components/'), 900);
+});
+
+test('fuzzy score: directory dirname prefix match', t => {
+	t.is(fuzzyScoreFilePath('src/components/', 'comp'), 800);
+	t.is(fuzzyScoreFilePath('src/components/', 'src/comp'), 750);
+});
+
+test('fuzzy score: directory dirname substring match', t => {
+	t.is(fuzzyScoreFilePath('src/components/', 'mpone'), 700);
 });
 
 // Test getCurrentFileMention()
@@ -170,4 +196,73 @@ test('stops at next @ symbol', t => {
 // Clear cache between tests (if needed)
 test.afterEach(() => {
 	clearFileListCache();
+});
+
+test('getAllEntries returns directories with trailing slash alongside files', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-autocomplete-'));
+	t.teardown(() => {
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	mkdirSync(join(dir, 'src', 'components'), {recursive: true});
+	writeFileSync(join(dir, 'src', 'app.tsx'), 'export const App = 1;');
+	writeFileSync(
+		join(dir, 'src', 'components', 'Button.tsx'),
+		'export const Button = 1;',
+	);
+
+	const entries = await getAllEntries(dir);
+	const paths = entries.map(e => e.path);
+
+	t.true(paths.includes('src/'));
+	t.true(paths.includes('src/components/'));
+	t.true(paths.includes('src/app.tsx'));
+	t.true(paths.includes('src/components/Button.tsx'));
+
+	const srcDir = entries.find(e => e.path === 'src/');
+	t.true(srcDir?.isDirectory);
+
+	const file = entries.find(e => e.path === 'src/app.tsx');
+	t.false(file?.isDirectory);
+});
+
+test('getFileCompletions returns directory completions with isDirectory flag', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-autocomplete-'));
+	t.teardown(() => {
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	mkdirSync(join(dir, 'src', 'components'), {recursive: true});
+	writeFileSync(join(dir, 'src', 'app.tsx'), 'export const App = 1;');
+	writeFileSync(
+		join(dir, 'src', 'components', 'Button.tsx'),
+		'export const Button = 1;',
+	);
+
+	const completions = await getFileCompletions('comp', dir);
+	const dirCompletion = completions.find(c => c.path === 'src/components/');
+
+	t.truthy(dirCompletion);
+	t.true(dirCompletion!.isDirectory);
+	t.true(dirCompletion!.path.endsWith('/'));
+});
+
+test('getFileCompletions breaks score ties in favor of files', async t => {
+	const dir = mkdtempSync(join(tmpdir(), 'nanocoder-autocomplete-ties-'));
+	t.teardown(() => {
+		rmSync(dir, {recursive: true, force: true});
+	});
+
+	// Create src/components/ (directory) and src/components.ts (file)
+	// Query "comp" prefix matches both filename/dirname, resulting in tied score 800
+	mkdirSync(join(dir, 'src', 'components'), {recursive: true});
+	writeFileSync(join(dir, 'src', 'components.ts'), 'export const comp = 1;');
+
+	const completions = await getFileCompletions('comp', dir);
+	const compFileIdx = completions.findIndex(c => c.path === 'src/components.ts');
+	const compDirIdx = completions.findIndex(c => c.path === 'src/components/');
+
+	t.true(compFileIdx !== -1);
+	t.true(compDirIdx !== -1);
+	t.true(compFileIdx < compDirIdx, 'file is ranked ahead of directory on score tie');
 });

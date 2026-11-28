@@ -129,19 +129,22 @@ These shortcuts work directly in the chat input — no `/` prefix needed.
 | Syntax | Description |
 |--------|-------------|
 | `!command` | Execute bash commands directly without leaving Nanocoder (output becomes context for the LLM) |
-| `@file` | Include file contents in messages via fuzzy search — press Tab to select from suggestions |
+| `@file` / `@dir/` | Include file contents or directory structure in messages via fuzzy search — press Tab to select from suggestions |
 | `@file:10-20` | Include specific line range from a file (line 10 to 20) |
 | `@file:10` | Include a single line from a file |
 
-### File Mentions
+### File and Directory Mentions
 
-The `@` syntax triggers real-time fuzzy matching as you type. Nanocoder searches your project files (respecting `.gitignore`) and shows autocomplete suggestions. Press **Tab** to accept a suggestion.
+The `@` syntax triggers real-time fuzzy matching as you type. Nanocoder searches your project files and directories (respecting `.gitignore` and `.nanocoderignore`) and shows autocomplete suggestions, marking directory entries with a trailing `/`. Press **Tab** to accept a suggestion.
 
-You can narrow the context by specifying line ranges:
+Mentioning a directory attaches a compact tree listing of its contents up to 3 levels deep, bounded by a 200-entry limit. If a directory listing hits the cap, Nanocoder suggests using the `list_directory` tool for the full listing.
+
+You can narrow the context for files by specifying line ranges:
 
 ```
 What does this function do? @src/utils.ts:45-80
 Explain the error on @src/app.tsx:23
+What does the layout of @src/ look like?
 ```
 
 ### Shell Commands

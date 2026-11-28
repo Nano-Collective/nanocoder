@@ -70,7 +70,7 @@ Take care to send a bare `\n`. A sequence such as `"\\\r\n"` sends a literal bac
 | Insert the suggested next command in an empty prompt | Tab |
 | Dismiss the suggested next command | Esc (empty prompt) |
 
-Typing `/` at the start of the prompt opens the command menu straight away and filters it as you type. Up/Down move the highlight, and Tab or Enter accepts the highlighted command. Typing `@` opens file suggestions the same way.
+Typing `/` at the start of the prompt opens the command menu straight away and filters it as you type. Up/Down move the highlight, and Tab or Enter accepts the highlighted command. Typing `@` opens file and directory suggestions the same way.
 
 After a turn that edits files, the empty prompt suggests a follow-up command: `/commit` when changes are already staged, otherwise `/checkpoint create`. Typing replaces the suggestion, Tab inserts it, and Esc dismisses it.
 

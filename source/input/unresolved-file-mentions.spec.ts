@@ -133,13 +133,25 @@ test.serial('prefers a same-extension suggestion on a tie', async t => {
 	t.is(unresolved[0]?.suggestion, 'lib/utli.ts');
 });
 
-test.serial('reports a directory mention as not a file', async t => {
+test.serial('resolves an existing directory mention', async t => {
 	const dir = inTempProject(t);
 
 	const unresolved = await findUnresolvedFileMentions('open @src/', dir);
 
+	t.deepEqual(unresolved, []);
+});
+
+test.serial('reports a missing directory mention as file not found', async t => {
+	const dir = inTempProject(t);
+
+	const unresolved = await findUnresolvedFileMentions(
+		'open @missing-dir/',
+		dir,
+	);
+
 	t.is(unresolved.length, 1);
-	t.is(unresolved[0]?.reason, 'is a directory, not a file');
+	t.is(unresolved[0]?.rawText, '@missing-dir/');
+	t.is(unresolved[0]?.reason, 'file not found');
 });
 
 test('formats a one-line warning and a model note', t => {
