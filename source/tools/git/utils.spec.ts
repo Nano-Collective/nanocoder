@@ -30,6 +30,7 @@ import {
 	getCurrentBranchSync,
 	getDefaultBranchSync,
 	getGitStatusSummarySync,
+	isRebaseInProgress,
 	pushBranch,
 	truncateDiff,
 } from './utils';
@@ -648,5 +649,92 @@ test.serial('pushBranch with an explicit cwd pushes from that directory, not pro
 	} finally {
 		rmSync(remoteDir, {recursive: true, force: true});
 		rmSync(cloneDir, {recursive: true, force: true});
+	}
+});
+
+test.serial('isRebaseInProgress returns true while paused and false after rebase completes', async t => {
+	if (!isGitAvailable()) {
+		t.pass('git not available; skipping');
+		return;
+	}
+	const repoDir = mkdtempSync(join(tmpdir(), 'nanocoder-rebase-status-'));
+	const env = {
+		...process.env,
+		GIT_CONFIG_GLOBAL: '/dev/null',
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_TERMINAL_PROMPT: '0',
+		GIT_EDITOR: 'true',
+	};
+	try {
+		execFileSync('git', ['init', '-q', '-b', 'main', repoDir], {env});
+		execFileSync('git', ['-C', repoDir, 'config', 'user.name', 'Test'], {env});
+		execFileSync('git', ['-C', repoDir, 'config', 'user.email', 'test@example.test'], {env});
+		writeFileSync(join(repoDir, 'f.txt'), 'base\n');
+		execFileSync('git', ['-C', repoDir, 'add', 'f.txt'], {env});
+		execFileSync('git', ['-C', repoDir, 'commit', '-qm', 'base'], {env});
+		execFileSync('git', ['-C', repoDir, 'checkout', '-qb', 'topic'], {env});
+		writeFileSync(join(repoDir, 'f.txt'), 'topic\n');
+		execFileSync('git', ['-C', repoDir, 'commit', '-qam', 'topic'], {env});
+		execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'main'], {env});
+		writeFileSync(join(repoDir, 'f.txt'), 'main\n');
+		execFileSync('git', ['-C', repoDir, 'commit', '-qam', 'main'], {env});
+		execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'topic'], {env});
+
+		// Rebase conflicts and pauses.
+		try {
+			execFileSync('git', ['-C', repoDir, 'rebase', 'main'], {env, stdio: 'ignore'});
+		} catch {
+			// expected conflict
+		}
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.true(await isRebaseInProgress());
+		});
+
+		// Resolve conflict and continue until rebase finishes.
+		writeFileSync(join(repoDir, 'f.txt'), 'resolved\n');
+		execFileSync('git', ['-C', repoDir, 'add', 'f.txt'], {env});
+		execFileSync('git', ['-C', repoDir, 'rebase', '--continue'], {env, stdio: 'ignore'});
+
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.false(await isRebaseInProgress());
+		});
+
+		// Rebase paused on `rebase -x false` is also detected.
+		try {
+			execFileSync('git', ['-C', repoDir, 'rebase', '-x', 'false', 'HEAD~1'], {
+				env,
+				stdio: 'ignore',
+			});
+		} catch {
+			// expected pause
+		}
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.true(await isRebaseInProgress());
+		});
+		execFileSync('git', ['-C', repoDir, 'rebase', '--abort'], {env, stdio: 'ignore'});
+
+		// Apply-backend rebase (`rebase-apply/rebasing`) is also detected.
+		execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'main'], {env});
+		writeFileSync(join(repoDir, 'f.txt'), 'main-apply\n');
+		execFileSync('git', ['-C', repoDir, 'commit', '-qam', 'main-apply'], {env});
+		execFileSync('git', ['-C', repoDir, 'checkout', '-q', 'topic'], {env});
+		try {
+			execFileSync(
+				'git',
+				['-C', repoDir, '-c', 'rebase.backend=apply', 'rebase', 'main'],
+				{env, stdio: 'ignore'},
+			);
+		} catch {
+			// expected conflict
+		}
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.true(await isRebaseInProgress());
+		});
+		execFileSync('git', ['-C', repoDir, 'rebase', '--abort'], {env, stdio: 'ignore'});
+		await runInSessionContext(createSessionContext(repoDir), async () => {
+			t.false(await isRebaseInProgress());
+		});
+	} finally {
+		rmSync(repoDir, {recursive: true, force: true});
 	}
 });
