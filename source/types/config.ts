@@ -343,7 +343,12 @@ export interface ModeProviderConfig {
 // ---------------------------------------------------------------------------
 
 /** Valid default mode values for agents.config.json. */
-export type DiskDefaultMode = 'normal' | 'auto-accept' | 'yolo' | 'plan';
+export type DiskDefaultMode =
+	| 'normal'
+	| 'auto-accept'
+	| 'yolo'
+	| 'plan'
+	| 'architect';
 
 /**
  * Per-mode provider/model overrides keyed by mode name (e.g. use a fast
@@ -462,8 +467,23 @@ export interface DiskProfileConfig
 	provider?: string;
 	/** Model name to use for this profile. */
 	model?: string;
-	/** Mode to start in (normal, auto-accept, yolo, plan). */
+	/** Starting development mode. Takes precedence over the profile's defaultMode. */
 	mode?: DiskDefaultMode;
+	/** MCP servers to merge when this profile is active, keyed by server name. */
+	mcpServers?: DiskMCPServersConfig;
+}
+
+interface DiskMCPServersConfig {
+	[serverName: string]: DiskMCPServerConfig;
+}
+
+interface DiskMCPServerConfig
+	extends Omit<
+		MCPServerConfig,
+		'name' | 'transport' | 'source' | 'rawEnv' | 'rawHeaders'
+	> {
+	/** Defaults to stdio when omitted. */
+	transport?: MCPServerConfig['transport'];
 }
 
 /**

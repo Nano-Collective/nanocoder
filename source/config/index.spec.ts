@@ -87,7 +87,7 @@ test.serial('LSP auto-discovery setting falls through config layers and defaults
 	}
 });
 
-test.serial('getAppConfig does not throw when the active profile disappears', t => {
+test.serial('reloadAppConfig falls back to files when the active profile disappears', t => {
 	const originalCwd = process.cwd();
 	const originalConfigDir = process.env.NANOCODER_CONFIG_DIR;
 	const projectDir = join(testDir, 'profile-removed-project');
@@ -97,19 +97,41 @@ test.serial('getAppConfig does not throw when the active profile disappears', t 
 	try {
 		process.env.NANOCODER_CONFIG_DIR = globalDir;
 		process.chdir(projectDir);
+		const configPath = join(projectDir, 'agents.config.json');
+		const base = {defaultProfile: 'gone', autoCompact: {threshold: 70}};
 		writeFileSync(
-			join(projectDir, 'agents.config.json'),
-			JSON.stringify({nanocoder: {defaultProfile: 'gone'}}),
-			'utf-8',
+			configPath,
+			JSON.stringify({
+				nanocoder: {
+					...base,
+					profiles: {
+						gone: {
+							autoCompact: {threshold: 90},
+							mcpServers: {docs: {command: 'profile-server'}},
+						},
+					},
+				},
+			}),
 		);
-		// loadHierarchicalConfig used to call getActiveProfile on the unknown
-		// profile and throw: it must fall back to the files instead.
+		writeFileSync(
+			join(projectDir, '.mcp.json'),
+			JSON.stringify({mcpServers: {docs: {command: 'project-server'}}}),
+		);
 		reloadAppConfig();
-		t.truthy(getAppConfig());
-		// Simulate the profile being removed mid-session: reloading must still
-		// not throw.
+		t.is(getAppConfig().autoCompact?.threshold, 90);
+		t.like(getAppConfig().mcpServers?.find(server => server.name === 'docs'), {
+			command: 'profile-server',
+			source: 'profile',
+		});
+
+		// Remove the selected profile without changing the selection.
+		writeFileSync(configPath, JSON.stringify({nanocoder: base}));
 		reloadAppConfig();
-		t.truthy(getAppConfig());
+		t.is(getAppConfig().autoCompact?.threshold, 70);
+		t.like(getAppConfig().mcpServers?.find(server => server.name === 'docs'), {
+			command: 'project-server',
+			source: 'project',
+		});
 	} finally {
 		clearAppConfig();
 		process.chdir(originalCwd);

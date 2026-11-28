@@ -88,9 +88,32 @@ Before enabling a memory server, review its documentation and configuration:
 
 Both are loaded together. When the same server name exists in both, the project-level config takes precedence.
 
+### Named Profiles
+
+In `agents.config.json`, add a `mcpServers` object inside a [named profile](index.md#named-configuration-profiles). Use the same object keyed by server name as in `.mcp.json`:
+
+```json
+{
+  "nanocoder": {
+    "profiles": {
+      "review": {
+        "mcpServers": {
+          "docs": {
+            "transport": "http",
+            "url": "https://example.com/mcp"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+When the profile is active (for example, with `--profile review`), its servers replace same-named servers from either `.mcp.json` file. Servers with different names remain available. Use `NANOCODER_PROFILE=review nanocoder config show mcpServers.docs` to inspect the source without connecting to the server.
+
 ### Environment Variable Overrides
 
-You can also define MCP servers via environment variables. These take **highest precedence**, overriding both project and global configs when the same server name exists.
+You can also define MCP servers via environment variables. These take **highest precedence**, replacing any same-named server from the active profile or a `.mcp.json` file.
 
 | Variable | Description |
 |----------|-------------|
@@ -117,7 +140,7 @@ export NANOCODER_MCPSERVERS='{"mcpServers":{"my-server":{"transport":"http","url
 export NANOCODER_MCPSERVERS_FILE=/path/to/mcp-servers.json
 ```
 
-**Precedence order:** Environment variables > Project `.mcp.json` > Global `.mcp.json`
+**Precedence order:** Environment variables > Active profile > Project `.mcp.json` > Global `.mcp.json`
 
 ## Transport Types
 

@@ -20,7 +20,7 @@ To enable autocompletion and inline validation, add the `$schema` key at the top
 }
 ```
 
-The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`, `ui` such as `maxFps`, `ciWatch` and `voice`) are deliberately not advertised on this schema, and neither are MCP servers, which live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
+The schema only describes keys the loader actually reads from `agents.config.json`. Settings read from `nanocoder-preferences.json` (`notifications`, `sessions`, `paste`, `ui` such as `maxFps`, `ciWatch` and `voice`) are deliberately not advertised on this schema. MCP servers are described by this schema only inside named profiles; standalone MCP servers live in `.mcp.json` (see [MCP Configuration](mcp-configuration.md)).
 
 You can also wire it up without the `$schema` key:
 
@@ -47,7 +47,7 @@ How the layers combine depends on the setting:
 - **Providers** are merged by name. Providers from the global file, the project file and the `NANOCODER_PROVIDERS` environment variable are all loaded; when two layers define a provider with the same name (case-insensitive), the higher-priority layer's entry replaces it (environment variable, then project, then global).
 - **Every `nanocoder.*` block** (`autoCompact`, `hooks`, `retries`, `modeProviders` and so on) is resolved block by block: the project file's block wins as a whole if it exists, otherwise the global file's block is used. See the note under [Inspecting the Effective Configuration](#inspecting-the-effective-configuration).
   A top-level `providers` array outside the `nanocoder` key is still accepted as a legacy form. It is used only when the file has no `nanocoder.providers` array.
-- **MCP servers** are not read from `agents.config.json` at all. They come from `.mcp.json` files and `NANOCODER_MCPSERVERS`; see [MCP Configuration](mcp-configuration.md).
+- **MCP servers** are merged by name from `.mcp.json` files, the active named profile, and environment overrides. Within `agents.config.json`, declare them only under `nanocoder.profiles.<name>.mcpServers`; see [MCP Configuration](mcp-configuration.md).
 
 > **Note:** `NANOCODER_CONFIG_DIR` replaces the platform-specific user-level directory above. It does not turn off the project layer for `agents.config.json` or `.mcp.json`: a project file in the working directory still applies. It does skip the project-level `nanocoder-preferences.json` for top-level preferences (see [Preferences](preferences.md) for the exceptions).
 
@@ -244,6 +244,9 @@ Each profile can specify:
 - `mode` (string): Starting development mode (`normal`, `auto-accept`, `yolo`, `plan`, `architect`)
 - Any `nanocoder.*` settings: `autoCompact`, `hooks`, `formatters`, `alwaysAllow`, `disabledTools`, `sandbox`, `firewall`, `retries`, `tune`, `systemPrompt`, etc.
 - Profile-specific `providers` array, merged into the available providers when the profile is active
+- Profile-specific `mcpServers` object keyed by server name, with the same server fields as [`.mcp.json`](mcp-configuration.md#named-profiles). Only servers in the active profile are loaded from `agents.config.json`.
+
+To set a context window in a profile, use `contextWindow` or `contextWindows` on an entry in the profile's `providers` array. See [Context Limit Resolution Order](#context-limit-resolution-order).
 
 #### Profile Selection Precedence
 
@@ -254,7 +257,7 @@ Nanocoder resolves the active profile in this order:
 3. `nanocoder.defaultProfile` in `agents.config.json` (project layer wins over global)
 4. No profile active (base configuration)
 
-Specifying an unknown profile name fails fast with an error listing available profiles.
+Specifying an unknown profile name at startup fails fast with an error listing available profiles. If the selected profile disappears while a session is running, reloading the configuration falls back to the base settings.
 
 #### Using Profiles
 

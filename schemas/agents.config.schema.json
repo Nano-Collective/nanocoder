@@ -20,6 +20,100 @@
 		}
 	},
 	"definitions": {
+		"DiskMCPServerConfig": {
+			"properties": {
+				"alwaysAllow": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"args": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"command": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"enabled": {
+					"type": "boolean"
+				},
+				"env": {
+					"$ref": "#/definitions/RecordStringString"
+				},
+				"headers": {
+					"$ref": "#/definitions/RecordStringString"
+				},
+				"healthCheckInterval": {
+					"description": "Period between MCP ping health checks, in milliseconds.",
+					"type": "number"
+				},
+				"resetTimeoutOnProgress": {
+					"description": "Restart the tool-call timer whenever the server reports progress, so a\nlong call that keeps reporting is not cut off. Defaults to true.",
+					"type": "boolean"
+				},
+				"tags": {
+					"items": {
+						"type": "string"
+					},
+					"type": "array"
+				},
+				"timeout": {
+					"type": "number"
+				},
+				"toolTimeout": {
+					"description": "How long a tool call may wait for the server, in milliseconds. Defaults\nto the MCP SDK's 60 seconds; 0 means no limit.",
+					"type": "number"
+				},
+				"transport": {
+					"description": "Defaults to stdio when omitted.",
+					"enum": ["http", "stdio", "websocket"],
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				}
+			},
+			"type": "object",
+			"additionalProperties": false,
+			"if": {
+				"required": ["transport"],
+				"properties": {
+					"transport": {
+						"enum": ["http", "websocket"]
+					}
+				}
+			},
+			"then": {
+				"required": ["url"],
+				"properties": {
+					"url": {
+						"type": "string",
+						"minLength": 1
+					}
+				}
+			},
+			"else": {
+				"required": ["command"],
+				"properties": {
+					"command": {
+						"type": "string",
+						"minLength": 1
+					}
+				}
+			}
+		},
+		"DiskMCPServersConfig": {
+			"additionalProperties": {
+				"$ref": "#/definitions/DiskMCPServerConfig"
+			},
+			"type": "object"
+		},
 		"DiskNanocoderConfig": {
 			"description": "On-disk representation of the `nanocoder` namespace in agents.config.json.\n\nEvery field is optional — the loader applies sensible defaults for each one.\nFields that live in nanocoder-preferences.json (notifications, sessions,\npaste) are intentionally absent: the schema should not advertise keys the\nloader silently ignores.",
 			"properties": {
@@ -40,7 +134,7 @@
 				},
 				"defaultMode": {
 					"description": "Default conversation mode when none is specified.",
-					"enum": ["auto-accept", "normal", "plan", "yolo"],
+					"enum": ["architect", "auto-accept", "normal", "plan", "yolo"],
 					"type": "string"
 				},
 				"defaultProfile": {
@@ -207,7 +301,7 @@
 				},
 				"defaultMode": {
 					"description": "Default conversation mode when none is specified.",
-					"enum": ["auto-accept", "normal", "plan", "yolo"],
+					"enum": ["architect", "auto-accept", "normal", "plan", "yolo"],
 					"type": "string"
 				},
 				"disabledTools": {
@@ -294,9 +388,13 @@
 					},
 					"type": "array"
 				},
+				"mcpServers": {
+					"$ref": "#/definitions/DiskMCPServersConfig",
+					"description": "MCP servers to merge when this profile is active, keyed by server name."
+				},
 				"mode": {
-					"description": "Mode to start in (normal, auto-accept, yolo, plan).",
-					"enum": ["auto-accept", "normal", "plan", "yolo"],
+					"description": "Starting development mode. Takes precedence over the profile's defaultMode.",
+					"enum": ["architect", "auto-accept", "normal", "plan", "yolo"],
 					"type": "string"
 				},
 				"modeProviders": {
@@ -773,6 +871,9 @@
 		},
 		"DiskModeProviders": {
 			"properties": {
+				"architect": {
+					"$ref": "#/definitions/ModeProviderConfig"
+				},
 				"auto-accept": {
 					"$ref": "#/definitions/ModeProviderConfig"
 				},

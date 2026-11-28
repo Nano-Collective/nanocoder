@@ -159,11 +159,14 @@ function renderList(config: EffectiveConfig): string {
 function resolutionNote(entry: EffectiveConfigEntry): string {
 	switch (entry.rule) {
 		case 'block':
-			return `How this is decided: "${entry.block}" is taken as a whole block from one file — the project file first, then the global one. Anything that file leaves out uses the built-in default. It is not filled in from the other file.`;
+			if (entry.block === 'nanocoder.defaultMode') {
+				return 'How this is decided: the first valid mode wins — the active profile first, then the project file, then the global one.';
+			}
+			return `How this is decided: "${entry.block}" is taken as a whole block from one layer — the active profile (for agents.config.json), then the project file, then the global one. Anything that layer leaves out uses the built-in default. It is not filled in from the other layers.`;
 		case 'closest-file':
 			return 'How this is decided: preferences come from one file only — the project file if it exists, otherwise the global one. The other file is ignored completely.';
 		case 'merge-by-name':
-			return 'How this is decided: these are matched up by name. An environment variable wins, then the project file, then the global one. Only an entry with the same name gets replaced.';
+			return 'How this is decided: these are matched up by name. An environment variable wins, then the active profile, then the project file, then the global one. Only an entry with the same name gets replaced.';
 		case 'env':
 			return `How this is decided: the ${entry.origin} environment variable beats every config file for this setting.`;
 	}

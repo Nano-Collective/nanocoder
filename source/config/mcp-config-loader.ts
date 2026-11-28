@@ -216,20 +216,9 @@ export function loadAllMCPConfigs(
 	// not an array.
 	let profileServers: MCPServerWithSource[] = [];
 	try {
-		const activeProfile = getActiveProfile(cwd);
-		const rawProfileServers = (activeProfile as Record<string, unknown>)
-			?.mcpServers;
-		if (
-			rawProfileServers &&
-			typeof rawProfileServers === 'object' &&
-			!Array.isArray(rawProfileServers)
-		) {
-			profileServers = Object.entries(
-				rawProfileServers as Record<string, unknown>,
-			).map(([name, serverConfig]) =>
-				mapAndSubstituteServer({name, ...(serverConfig as object)}, 'profile'),
-			);
-		}
+		const parsed = parseMCPServers(getActiveProfile(cwd));
+		profileServers =
+			parsed?.map(server => mapAndSubstituteServer(server, 'profile')) ?? [];
 	} catch {
 		// A removed or renamed active profile is silently ignored so MCP
 		// config loading keeps falling back to the files instead of crashing.

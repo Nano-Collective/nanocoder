@@ -13,8 +13,9 @@
  *     (autoCompact, tune, headless) stay all-optional. Genuinely required
  *     fields are added by hand (ProviderConfig.name/models,
  *     OpenRouterPlugin.id, and lspServers item name/command/languages).
- *     MCP servers are not part of agents.config.json: they live in .mcp.json
- *     (or NANOCODER_MCPSERVERS), so MCPServerConfig is not in this schema.
+ *     MCP servers normally live in .mcp.json or NANOCODER_MCPSERVERS.
+ *     Within agents.config.json, only named profiles can declare them, using
+ *     DiskMCPServerConfig without runtime fields such as source or rawEnv.
  *   - `--noExtraProps` is NOT used: it corrupts `Record<string, X>` into
  *     `{type:object, additionalProperties:false}` which rejects every key.
  *     Instead `additionalProperties: false` is applied eagerly to every
@@ -232,6 +233,25 @@ function main(): void {
 	setRequired(definitions, 'ModeProviderConfig', ['provider', 'model']);
 	setRequired(definitions, 'HookDefinition', ['command']);
 	setRequired(definitions, 'FormatterConfig', ['match', 'command']);
+
+	const diskMCPServer = definitions.DiskMCPServerConfig as JsonNode | undefined;
+	if (diskMCPServer) {
+		// Only explicit remote transports require a URL. Omitted transport
+		// defaults to stdio in the MCP client. Runtime validation still checks
+		// the executable or URL after environment variable substitution.
+		diskMCPServer.if = {
+			required: ['transport'],
+			properties: {transport: {enum: ['http', 'websocket']}},
+		};
+		diskMCPServer.then = {
+			required: ['url'],
+			properties: {url: {type: 'string', minLength: 1}},
+		};
+		diskMCPServer.else = {
+			required: ['command'],
+			properties: {command: {type: 'string', minLength: 1}},
+		};
+	}
 
 	// lspServers is an inline array with an anonymous item schema (not a
 	// named definition).  The type requires name, command, languages.
