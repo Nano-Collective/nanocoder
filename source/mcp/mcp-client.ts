@@ -587,8 +587,10 @@ export class MCPClient {
 		for (const [serverName, serverTools] of this.serverTools.entries()) {
 			for (const mcpTool of serverTools) {
 				const toolName = mcpTool.name;
-				nativeTools[toolName] = toNativeTool(serverName, mcpTool, input =>
-					this.callTool(toolName, input),
+				nativeTools[toolName] = toNativeTool(
+					serverName,
+					mcpTool,
+					(input, options) => this.callTool(toolName, input, options),
 				);
 			}
 		}
@@ -644,8 +646,8 @@ export class MCPClient {
 				const coreTool = nativeTools[toolName];
 
 				if (coreTool) {
-					const handler = createValidatedHandler(coreTool, args =>
-						this.callTool(toolName, args),
+					const handler = createValidatedHandler(coreTool, (args, options) =>
+						this.callTool(toolName, args, options),
 					);
 					const approval = createMCPToolApproval({
 						readOnly: mcpTool.readOnly === true,
@@ -686,6 +688,7 @@ export class MCPClient {
 	async callTool(
 		toolName: string,
 		args: Record<string, unknown>,
+		options?: {abortSignal?: AbortSignal},
 	): Promise<string | StructuredToolOutput> {
 		// First, try to find which server has this tool
 		const toolMapping = this.getToolMapping();
@@ -704,6 +707,7 @@ export class MCPClient {
 						originalToolName,
 						args,
 						serverName,
+						options?.abortSignal,
 					),
 				);
 			}
@@ -723,6 +727,7 @@ export class MCPClient {
 				mapping.originalName,
 				sanitizedArgs,
 				mapping.serverName,
+				options?.abortSignal,
 			),
 		);
 	}
@@ -741,12 +746,14 @@ export class MCPClient {
 	private toolCallOptions(
 		serverName: string,
 		toolName: string,
+		abortSignal?: AbortSignal,
 	): RequestOptions {
 		const resetTimeoutOnProgress =
 			this.serverConfigs.get(serverName)?.resetTimeoutOnProgress ?? true;
 		return {
 			timeout: this.toolTimeoutFor(serverName),
 			resetTimeoutOnProgress,
+			...(abortSignal && {signal: abortSignal}),
 			// The SDK only asks the server for progress when a handler is set,
 			// so without one there would be nothing to reset the timer.
 			...(resetTimeoutOnProgress && {
@@ -773,6 +780,7 @@ export class MCPClient {
 		toolName: string,
 		args: Record<string, unknown>,
 		serverName?: string,
+		abortSignal?: AbortSignal,
 	): Promise<string | StructuredToolOutput> {
 		const correlationId = generateCorrelationId();
 		const metrics = startMetrics();
@@ -786,10 +794,15 @@ export class MCPClient {
 			});
 
 			try {
+				const requestOptions = serverName
+					? this.toolCallOptions(serverName, toolName, abortSignal)
+					: abortSignal
+						? {signal: abortSignal}
+						: undefined;
 				const result = await client.callTool(
 					{name: toolName, arguments: args},
 					undefined,
-					serverName ? this.toolCallOptions(serverName, toolName) : undefined,
+					requestOptions,
 				);
 
 				this.logger.debug('MCP tool executed successfully', {
@@ -836,10 +849,18 @@ export class MCPClient {
 
 				return output('Tool executed successfully (no output)');
 			} catch (error) {
+				const finalMetrics = endMetrics(metrics);
+				if (abortSignal?.aborted) {
+					this.logger.debug('MCP tool execution cancelled', {
+						toolName,
+						duration: `${finalMetrics.duration.toFixed(2)}ms`,
+						correlationId,
+					});
+					throw error;
+				}
+
 				const errorMessage = formatError(error);
 				const errorName = error instanceof Error ? error.name : 'Unknown';
-
-				const finalMetrics = endMetrics(metrics);
 
 				this.logger.error('MCP tool execution failed', {
 					toolName,

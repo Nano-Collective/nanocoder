@@ -1429,6 +1429,20 @@ test('MCPClient.callTool: passes the server toolTimeout and resetTimeoutOnProgre
 	t.is(options[0]?.onprogress, undefined);
 });
 
+test('MCPClient.callTool: forwards cancellation without dropping server timeout options', async t => {
+	const {client, options} = clientRecordingToolOptions({
+		toolTimeout: 300_000,
+		resetTimeoutOnProgress: false,
+	});
+	const controller = new AbortController();
+
+	await client.callTool('tool', {}, {abortSignal: controller.signal});
+
+	t.is(options[0]?.signal, controller.signal);
+	t.is(options[0]?.timeout, 300_000);
+	t.false(options[0]?.resetTimeoutOnProgress);
+});
+
 test('MCPClient.callTool: toolTimeout 0 and oversized values become the longest timer Node allows', async t => {
 	for (const toolTimeout of [0, 10_000_000_000]) {
 		const {client, options} = clientRecordingToolOptions({toolTimeout});
@@ -1732,6 +1746,74 @@ const waitFor = async (condition: () => boolean, timeoutMs = 2000) => {
 		await new Promise(resolve => setTimeout(resolve, 5));
 	}
 };
+
+const makeAbortAwareMCPClient = () => {
+	const receivedSignals: (AbortSignal | undefined)[] = [];
+	const client = new MCPClient();
+	// @ts-expect-error Set up a connected server without starting a transport.
+	client.serverTools.set('test-server', [
+		{
+			name: 'slow_tool',
+			description: 'A slow tool',
+			serverName: 'test-server',
+			inputSchema: {type: 'object', properties: {}},
+		},
+	]);
+	// @ts-expect-error Set up a connected server without starting a transport.
+	client.clients.set('test-server', {
+		async callTool(
+			_params: unknown,
+			_schema: unknown,
+			options?: {signal?: AbortSignal},
+		) {
+			const signal = options?.signal;
+			receivedSignals.push(signal);
+			return await new Promise((_, reject) => {
+				signal?.addEventListener('abort', () => reject(signal.reason), {
+					once: true,
+				});
+			});
+		},
+	});
+	return {client, receivedSignals};
+};
+
+test('MCP native tools forward cancellation to the MCP request', async t => {
+	const {client, receivedSignals} = makeAbortAwareMCPClient();
+	const controller = new AbortController();
+	const nativeTool = client.getNativeToolsRegistry().slow_tool;
+	const execute = nativeTool.execute;
+	t.truthy(execute);
+	if (!execute) return;
+
+	const pending = execute({}, {
+		toolCallId: 'call',
+		messages: [],
+		abortSignal: controller.signal,
+	});
+	await waitFor(() => receivedSignals.length === 1);
+	t.is(receivedSignals[0], controller.signal);
+	controller.abort();
+
+	const error = await t.throwsAsync(() => pending, {any: true});
+	t.is(error, controller.signal.reason);
+});
+
+test('validated MCP handlers forward cancellation to the MCP request', async t => {
+	const {client, receivedSignals} = makeAbortAwareMCPClient();
+	const controller = new AbortController();
+	const handler = client.getToolEntries()[0]?.handler;
+	t.truthy(handler);
+	if (!handler) return;
+
+	const pending = handler({}, {abortSignal: controller.signal});
+	await waitFor(() => receivedSignals.length === 1);
+	t.is(receivedSignals[0], controller.signal);
+	controller.abort();
+
+	const error = await t.throwsAsync(() => pending, {any: true});
+	t.is(error, controller.signal.reason);
+});
 
 // Hands out a fresh SDK client per connect, as the real createClient() does.
 class QueueMCPClient extends MCPClient {
