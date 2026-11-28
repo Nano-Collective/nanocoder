@@ -44,7 +44,7 @@ Read-only tools (`read_file`, `find_files`, `search_file_contents`, `list_direct
 
 - See exactly what the AI wants to do before it happens
 - Approve or reject each action individually
-- Approval cards for `execute_bash`, `string_replace`, `write_file`, `diff_edit`, and `file_op` can show a one-line description of the model's intent above the command or path, when the model supplies one
+- Approval cards for `execute_bash`, `string_replace`, `write_file`, `diff_edit`, `edit_notebook`, and `file_op` can show a one-line description of the model's intent when the model supplies one
 - Best for unfamiliar codebases, sensitive operations, or when you want full control
 
 **When to use:** Starting a new project, working with code you don't fully understand, or when the AI is making changes you want to review carefully.
@@ -59,6 +59,7 @@ Automatically accepts and executes most tool calls without confirmation. Some hi
 - Still prompts: `execute_bash`, `browser`, `git_commit`, `git_pr` when it creates, comments on or reviews a pull request, `file_op` when it deletes a file or when a move or copy would overwrite an existing file, MCP tools, and custom tools declared `approval: always`. File edits, `git_add`, and custom tools with `approval: destructive` run without a prompt
 - An MCP tool runs without a prompt only when its server annotates it read-only (`readOnlyHint`) or lists it in the server's [`alwaysAllow`](../configuration/mcp-configuration.md#auto-approve-tools). A server can expose a tool as capable as a shell, so the rest ask first, the same as `execute_bash`
 - A delete or an overwrite shows no diff and cannot be undone, so `file_op` asks first, the same as `rm` through `execute_bash`. Creating directories, and moving or copying to a path that does not exist yet, still run without a prompt
+- `edit_notebook` asks before deleting a cell or changing its type. Source replacements and insertions run without a prompt
 
 **When to use:** Tasks you trust the AI to handle — code generation, refactoring well-understood code, running tests, or when you want to step back and let the AI work through a problem.
 
@@ -106,7 +107,7 @@ Plan mode removes mutation tools and leaves only read-only and interaction tools
 
 `write_plan` is the one write plan mode allows. It writes the Markdown plan to the session's own artifact directory. When the model also passes `nodes`, it persists the dependency graph to `.nanocoder/plans/` in the project — gitignored runtime state, so the plan survives session restarts. `write_plan` exists in plan mode only; the other modes do not have it.
 
-The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`), the shell tools (`execute_bash`, `bash_output`, `kill_bash`), `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), the git write tools (`git_add`, `git_commit`, `git_pr`), and `update_plan_node` — planning may define the graph, but marking work as done is execution. Custom tools are available only when they declare `approval: never` and `read_only: true`.
+The following are **excluded**: the file mutation tools (`write_file`, `string_replace`, `diff_edit`, `edit_notebook`, `file_op`, `lsp_format_document`), the shell tools (`execute_bash`, `bash_output`, `kill_bash`), `browser`, the task and walkthrough tools (`write_tasks`, `write_walkthrough`), the git write tools (`git_add`, `git_commit`, `git_pr`), and `update_plan_node` — planning may define the graph, but marking work as done is execution. Custom tools are available only when they declare `approval: never` and `read_only: true`.
 
 Subagents started with `agent` in plan mode get the same exclusions, so delegating work does not open a path to a mutation.
 
@@ -192,7 +193,7 @@ Revert restores files. It does not undo side effects — a `git push`, a deleted
 
 Architect waives per-call approval for file mutation tools only. Everything with a side effect a checkpoint cannot undo still prompts exactly as it does in normal mode:
 
-- **Waived** — `write_file`, `string_replace`, `diff_edit`, `file_op`, `lsp_format_document`, and any custom tool that mutates files
+- **Waived** — `write_file`, `string_replace`, `diff_edit`, `edit_notebook`, `file_op`, `lsp_format_document`, and any custom tool that mutates files
 - **Still prompts** - `execute_bash`, `browser`, MCP tools (unless listed in the server's `alwaysAllow`), and custom tools declared `approval: always`
 
 Gating a turn twice would make architect worse than normal mode rather than better, so the batching only pays off if the turn runs uninterrupted.

@@ -6,6 +6,7 @@ import type {
 	ToolKind,
 } from '@agentclientprotocol/sdk';
 import {getSafeSessionCwd} from '@/services/session-cwd';
+import {getNotebookEditPreview} from '@/tools/file-ops/edit-notebook';
 import {
 	fitContentToLineEndings,
 	fitEditToLineEndings,
@@ -14,6 +15,7 @@ import {
 	countLiteralOccurrences,
 	replaceFirstLiteral,
 } from '@/tools/file-ops/literal-replace';
+import type {EditNotebookArgs} from '@/tools/file-ops/notebook-edit';
 import type {ToolCall} from '@/types/core';
 import {truncateText} from '@/utils/truncate-text';
 
@@ -43,6 +45,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
 	string_replace: 'edit',
 	write_file: 'edit',
 	diff_edit: 'edit',
+	edit_notebook: 'edit',
 	execute_bash: 'execute',
 	bash_output: 'read',
 	kill_bash: 'execute',
@@ -129,6 +132,15 @@ export async function buildToolCallMeta(
 				if (diff) content.push(diff);
 			} else if (name === 'write_file') {
 				content.push(await buildWriteFileDiff(path, args));
+			} else if (name === 'edit_notebook') {
+				const preview = await getNotebookEditPreview(
+					args as unknown as EditNotebookArgs,
+				).catch(() => undefined);
+				if (preview)
+					content.push({
+						type: 'content',
+						content: {type: 'text', text: preview},
+					});
 			}
 		}
 	}

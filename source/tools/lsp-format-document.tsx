@@ -10,6 +10,7 @@ import type {FormattingOptions, TextEdit} from '@/lsp/protocol';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {
 	validateEditableEncoding,
+	validateEditableFormat,
 	validatePath,
 } from '@/tools/file-ops/path-validators';
 import {markFileSeen} from '@/tools/runtime/read-tracker';
@@ -270,6 +271,8 @@ export async function formatFileWithLsp(
 	manager: FormatLspManager,
 	options?: Partial<FormatOptions>,
 ): Promise<string> {
+	const formatResult = validateEditableFormat(absPath);
+	if (!formatResult.valid) throw new Error(formatResult.error);
 	if (!manager.isInitialized()) {
 		return 'No language server available. Install a language server for this file type, or run with --vscode.';
 	}
@@ -441,6 +444,8 @@ const formatDocumentValidator = async (
 
 	const pathResult = validatePath(args.path);
 	if (!pathResult.valid) return pathResult;
+	const formatResult = validateEditableFormat(args.path);
+	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
 

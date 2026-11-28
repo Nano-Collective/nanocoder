@@ -8,6 +8,7 @@ const FILE_MUTATING_TOOLS: ReadonlySet<string> = new Set([
 	'write_file',
 	'string_replace',
 	'diff_edit',
+	'edit_notebook',
 	'lsp_format_document',
 	'file_op',
 ]);

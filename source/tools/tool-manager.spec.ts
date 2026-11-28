@@ -1221,7 +1221,7 @@ test('getAvailableToolNames - returns all tools when tune disabled', t => {
 test('getAvailableToolNames - filters to minimal profile', t => {
 	const manager = new ToolManager();
 	const result = manager.getAvailableToolNames({enabled: true, toolProfile: 'minimal', aggressiveCompact: false});
-	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'execute_bash', 'bash_output', 'kill_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
+	t.deepEqual(result, ['read_file', 'write_file', 'string_replace', 'edit_notebook', 'execute_bash', 'bash_output', 'kill_bash', 'find_files', 'search_file_contents', 'list_directory', 'agent']);
 });
 
 test('getAvailableToolNames - full profile returns all minus mode exclusions', t => {
@@ -1403,6 +1403,7 @@ test('getAvailableToolNames - disabledTools intersects with minimal profile', t 
 		'read_file',
 		'write_file',
 		'string_replace',
+		'edit_notebook',
 		'bash_output',
 		'kill_bash',
 		'find_files',

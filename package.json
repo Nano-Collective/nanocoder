@@ -101,6 +101,7 @@
 		"ink-gradient": "^4.0.1",
 		"ink-spinner": "^5.0.0",
 		"ink-tab": "^5.2.0",
+		"jsonc-parser": "3.3.1",
 		"llama-tokenizer-js": "^1.2.2",
 		"lru-cache": "^11.5.1",
 		"pino": "^10.1.0",
