@@ -19,6 +19,7 @@ export interface FetchedModel {
 export interface FetchModelsResult {
 	success: boolean;
 	models: FetchedModel[];
+	statusCode?: number;
 	error?: string;
 }
 
@@ -28,8 +29,9 @@ export type ApiCompatibility =
 	| 'anthropic'
 	| 'google';
 
-interface FetchModelsOptions {
+export interface FetchModelsOptions {
 	timeoutMs?: number;
+	headers?: Record<string, string>;
 }
 
 /**
@@ -46,13 +48,15 @@ export async function fetchModels(
 	options: FetchModelsOptions = {},
 ): Promise<FetchModelsResult> {
 	const {timeoutMs = 5000} = options;
+	let statusCode: number | undefined;
 
 	try {
 		let normalizedUrl = baseUrl.trim().replace(/\/$/, '');
 
 		// Build endpoint URL and headers based on API type
 		let endpoint: string;
-		const headers: Record<string, string> = {Accept: 'application/json'};
+		const headers = new Headers(options.headers);
+		headers.set('Accept', 'application/json');
 
 		switch (apiCompatibility) {
 			case 'ollama': {
@@ -65,8 +69,8 @@ export async function fetchModels(
 				// Anthropic: GET {baseUrl}/models with X-Api-Key
 				endpoint = `${normalizedUrl}/models`;
 				if (apiKey) {
-					headers['X-Api-Key'] = apiKey;
-					headers['anthropic-version'] = '2023-06-01';
+					headers.set('X-Api-Key', apiKey);
+					headers.set('anthropic-version', '2023-06-01');
 				}
 				break;
 			}
@@ -74,7 +78,7 @@ export async function fetchModels(
 				// Google: GET {baseUrl}/models with x-goog-api-key
 				endpoint = `${normalizedUrl}/models`;
 				if (apiKey) {
-					headers['x-goog-api-key'] = apiKey;
+					headers.set('x-goog-api-key', apiKey);
 				}
 				break;
 			}
@@ -82,7 +86,7 @@ export async function fetchModels(
 				// OpenAI-compatible: GET {baseUrl}/models with Bearer auth
 				endpoint = resolveOpenAICompatibleModelsEndpoint(normalizedUrl);
 				if (apiKey) {
-					headers.Authorization = `Bearer ${apiKey}`;
+					headers.set('Authorization', `Bearer ${apiKey}`);
 				}
 				break;
 			}
@@ -98,34 +102,34 @@ export async function fetchModels(
 				signal: controller.signal,
 				headers,
 			});
+			statusCode = response.status;
 
 			if (!response.ok) {
 				return {
 					success: false,
 					models: [],
+					statusCode: response.status,
 					error: `Server returned ${response.status}: ${response.statusText}`,
 				};
 			}
 
 			data = await response.json();
+			const models = parseModelsResponse(data, apiCompatibility);
+
+			if (models.length === 0) {
+				return {
+					success: false,
+					models: [],
+					statusCode: response.status,
+					error: 'No models found',
+				};
+			}
+
+			models.sort((a, b) => a.name.localeCompare(b.name));
+			return {success: true, models, statusCode: response.status};
 		} finally {
 			clearTimeout(timeoutId);
 		}
-
-		// Parse response based on API type
-		const models = parseModelsResponse(data, apiCompatibility);
-
-		if (models.length === 0) {
-			return {
-				success: false,
-				models: [],
-				error: 'No models found',
-			};
-		}
-
-		models.sort((a, b) => a.name.localeCompare(b.name));
-
-		return {success: true, models};
 	} catch (err) {
 		if (err instanceof Error && err.name === 'AbortError') {
 			return {success: false, models: [], error: 'Connection timed out'};
@@ -133,6 +137,7 @@ export async function fetchModels(
 		return {
 			success: false,
 			models: [],
+			...(statusCode !== undefined ? {statusCode} : {}),
 			error: formatError(err),
 		};
 	}

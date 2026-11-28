@@ -38,3 +38,29 @@ export function getPackageVersion(
 		return UNKNOWN_VERSION;
 	}
 }
+
+/** Read the minimum Node major supported by this package's simple engine range. */
+export function getPackageNodeMajorFloor(
+	packageJsonPath: string = DEFAULT_PACKAGE_JSON_PATH,
+): number | undefined {
+	try {
+		const packageJson = JSON.parse(
+			fs.readFileSync(packageJsonPath, 'utf8'),
+		) as {engines?: {node?: unknown}};
+		const requirement = packageJson.engines?.node;
+		if (typeof requirement !== 'string') return undefined;
+
+		const match = requirement
+			.trim()
+			.match(/^>=\s*v?(\d+)(?:\.\d+){0,2}(?:\s+<\s*v?\d+(?:\.\d+){0,2})*$/);
+		if (!match) return undefined;
+
+		const majorText = match[1];
+		if (!majorText) return undefined;
+
+		const major = Number.parseInt(majorText, 10);
+		return Number.isSafeInteger(major) ? major : undefined;
+	} catch {
+		return undefined;
+	}
+}
