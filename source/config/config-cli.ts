@@ -316,12 +316,20 @@ export function runConfigCli(
 		};
 	}
 
+	const positional: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === '--profile') {
-			setCliProfile(args[i + 1]);
+			const value = args[i + 1];
+			if (value === undefined || value.startsWith('-')) {
+				return {exitCode: 1, output: '--profile requires a profile name.'};
+			}
+			setCliProfile(value);
+			i++;
 		} else if (arg.startsWith('--profile=')) {
 			setCliProfile(arg.slice('--profile='.length));
+		} else if (!arg.startsWith('-')) {
+			positional.push(arg);
 		}
 	}
 
@@ -335,7 +343,6 @@ export function runConfigCli(
 	}
 
 	const json = args.includes('--json');
-	const positional = args.filter(arg => !arg.startsWith('-'));
 	const config = resolveEffectiveConfig(options);
 
 	if (command === 'diff') {
