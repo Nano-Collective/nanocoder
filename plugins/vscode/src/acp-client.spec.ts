@@ -115,6 +115,26 @@ async function makeHandshakenClient(
 	return {client, lines};
 }
 
+async function handshakeWithAgentVersion(version: string) {
+	const client = new NanocoderAcpClient(
+		{appendLine: () => {}} as any,
+		new AcpStateManager(),
+	);
+	client.setConnection({
+		initialize: async () => ({agentInfo: {version}, agentCapabilities: {}}),
+	} as any);
+	return client.initializeHandshake();
+}
+
+test('NanocoderAcpClient - accepts the minimum CLI version', async (t) => {
+	t.true(await handshakeWithAgentVersion('0.4.0'));
+});
+
+test('NanocoderAcpClient - rejects a prerelease below the minimum CLI version', async (t) => {
+	t.teardown(() => (vscode as any).__test.reset());
+	t.false(await handshakeWithAgentVersion('0.4.0-beta.1'));
+});
+
 test('NanocoderAcpClient - newChat closes the old session when the agent supports it', async (t) => {
 	const closed: string[] = [];
 	const {client} = await makeHandshakenClient(

@@ -3,6 +3,7 @@ import {TIMEOUT_UPDATE_CHECK_MS} from '@/constants';
 import type {NpmRegistryResponse, UpdateInfo} from '@/types/index';
 import {formatError} from '@/utils/error-formatter';
 import {getLogger} from '@/utils/logging';
+import {isNewerVersion} from '@/utils/version-compare';
 import {getPackageVersion, UNKNOWN_VERSION} from '../utils/package-version';
 import {detectInstallationMethod} from './installation-detector';
 
@@ -20,35 +21,6 @@ const UPDATE_MESSAGES = {
 	UNKNOWN:
 		'A new version is available. Please update using your package manager.',
 } as const;
-
-/**
- * Compare two semver version strings
- * Returns true if latest is greater than current
- */
-function isNewerVersion(current: string, latest: string): boolean {
-	const parseVersion = (version: string) => {
-		const clean = version.replace(/^v/, '').split('-')[0]; // Remove 'v' prefix and pre-release info
-		return clean.split('.').map(num => parseInt(num) || 0);
-	};
-
-	const currentParts = parseVersion(current);
-	const latestParts = parseVersion(latest);
-
-	const maxLength = Math.max(currentParts.length, latestParts.length);
-
-	for (let i = 0; i < maxLength; i++) {
-		const currentPart = currentParts[i] || 0;
-		const latestPart = latestParts[i] || 0;
-
-		if (latestPart > currentPart) {
-			return true;
-		} else if (latestPart < currentPart) {
-			return false;
-		}
-	}
-
-	return false;
-}
 
 /**
  * Fetch the latest version from npm registry
