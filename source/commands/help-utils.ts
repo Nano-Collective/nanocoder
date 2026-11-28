@@ -268,8 +268,14 @@ const COMMAND_HELP_OVERRIDES: Record<string, CommandHelpOverrides> = {
 		examples: ['/repomap --tokens 8000'],
 	},
 	resume: {
-		usage: '/resume',
-		examples: ['/resume'],
+		usage: '/resume [last|<id>|<n>|delete <id|n>|pin <id|n>] [--all]',
+		options: ['last', '<id>', '<n>', 'delete <id|n>', 'pin <id|n>', '--all'],
+		examples: [
+			'/resume',
+			'/resume last',
+			'/resume delete 2',
+			'/resume pin <id>',
+		],
 	},
 	review: {
 		usage: '/review [quick] [<branch | PR number | GitHub PR URL>]',

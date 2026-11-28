@@ -59,6 +59,8 @@ export interface ModalSelectorsProps {
 	// Handlers - Session resume
 	onSessionSelect: (sessionId: string) => void;
 	onSessionCancel: () => void;
+	onSessionDelete?: (sessionId: string) => void | Promise<void>;
+	onSessionPin?: (sessionId: string, pinned: boolean) => void | Promise<void>;
 
 	// Handlers - Settings
 	onSettingsCancel: () => void;
@@ -91,6 +93,8 @@ export function ModalSelectors({
 	onCheckpointCancel,
 	onSessionSelect,
 	onSessionCancel,
+	onSessionDelete,
+	onSessionPin,
 	onSettingsCancel,
 	onLaunchTune,
 	onLaunchIde,
@@ -177,6 +181,8 @@ export function ModalSelectors({
 				}
 				onCancel={onSessionCancel}
 				showAll={showAllSessions}
+				onDeleteSession={onSessionDelete}
+				onPinSession={onSessionPin}
 			/>
 		);
 	}

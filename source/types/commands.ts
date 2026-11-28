@@ -122,6 +122,13 @@ export interface CommandContext {
 	resumeSession?: (
 		session: import('@/session/session-manager').Session,
 	) => void | Promise<void>;
+	/** Delete a saved session; clears the conversation if it is the live one. */
+	deleteSession?: (sessionId: string) => void | Promise<void>;
+	/** Mark or unmark a saved session as exempt from retention. */
+	setSessionPinned?: (
+		sessionId: string,
+		pinned: boolean,
+	) => void | Promise<void>;
 	/** Missing where model switching is unavailable. */
 	switchModel?: (provider: string, model: string) => Promise<boolean>;
 	/** Switch development mode (normal, auto-accept, yolo, plan, architect). */

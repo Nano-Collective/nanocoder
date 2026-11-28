@@ -617,6 +617,50 @@ test('handleSessionCancel clears active mode', t => {
 	t.deepEqual(spies.setActiveMode.calls, [[null]]);
 });
 
+test.serial('deleteSession on the current session clears the conversation', async t => {
+	const {initialize, deleteSession} = sessionManager;
+	const deleted: string[] = [];
+	sessionManager.initialize = async () => {};
+	sessionManager.deleteSession = async id => {
+		deleted.push(id);
+	};
+	try {
+		const {handlers, spies} = setup();
+		const id = '11111111-1111-4111-8111-111111111111';
+
+		await handlers.deleteSession(id);
+
+		t.deepEqual(deleted, [id]);
+		t.deepEqual(spies.setCurrentSessionId.calls, [[null]]);
+		t.deepEqual(spies.setActiveMode.calls, [[null]]);
+	} finally {
+		Object.assign(sessionManager, {initialize, deleteSession});
+	}
+});
+
+test.serial('setSessionPinned delegates to the session manager', async t => {
+	const {initialize, setPinned} = sessionManager;
+	const calls: Array<[string, boolean]> = [];
+	sessionManager.initialize = async () => {};
+	sessionManager.setPinned = async (id, pinned) => {
+		calls.push([id, pinned]);
+		return null;
+	};
+	try {
+		const {handlers} = setup();
+
+		await handlers.setSessionPinned('session-a', true);
+		await handlers.setSessionPinned('session-a', false);
+
+		t.deepEqual(calls, [
+			['session-a', true],
+			['session-a', false],
+		]);
+	} finally {
+		Object.assign(sessionManager, {initialize, setPinned});
+	}
+});
+
 test('enterCheckpointLoadMode sets data then activates the mode', t => {
 	const { handlers, spies } = setup();
 

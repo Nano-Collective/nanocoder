@@ -35,6 +35,11 @@ export interface MessageSubmissionOptions {
 	) => void;
 	onEnterSessionSelectorMode?: (showAll?: boolean) => void;
 	onResumeSession?: (session: Session) => void | Promise<void>;
+	onDeleteSession?: (sessionId: string) => void | Promise<void>;
+	onSetSessionPinned?: (
+		sessionId: string,
+		pinned: boolean,
+	) => void | Promise<void>;
 	onShowStatus: () => void;
 	onHandleChatMessage: (
 		message: string,

@@ -21,7 +21,16 @@ You can also use the aliases `/sessions` or `/history`.
 
 Resuming switches to the provider and model the session was using. If that provider is no longer configured, Nanocoder shows an error and keeps your current model.
 
-In the selector, start typing to filter sessions by title; Backspace edits the filter, arrow keys and Enter pick a result, and Esc cancels.
+In the selector, start typing to filter sessions by title; Backspace edits the filter, arrow keys and Enter pick a result, and Esc cancels. Pinned sessions are marked `[pinned]`. Press Ctrl+D on the highlighted session and then `y` to delete it, or Ctrl+P to pin or unpin it.
+
+## Deleting or Pinning a Session
+
+```bash
+/resume delete <id|n>   # delete a session by ID or list index
+/resume pin <id|n>      # toggle a session's pin
+```
+
+Both accept the same `last` / ID / index targets and the `--all` flag as `/resume`. Deleting removes the saved conversation and its artifacts immediately, even when the session is pinned; deleting the current session clears the conversation as `/clear` does. Pinning exempts a session from retention without changing your configuration.
 
 ### From the Command Line
 
@@ -91,11 +100,11 @@ Sessions not used for `retentionDays` are deleted the next time any Nanocoder pr
 
 - An ACP client calls `_nanocoder/pinSession` with `sessionId` and `pinned: true` to pin a session, and `pinned: false` to clear the mark. The session has to be saved already, which happens with its first message. Pinning never changes your configuration.
 - Neither limit deletes a pinned session, and pinned sessions are not counted toward `maxSessions`, so they cannot push out unpinned recent ones. The mark survives autosave, renames and resuming.
-- Deleting a pinned session, from a client (`session/delete`) or the CLI, still removes it together with its artifacts.
+- Deleting a pinned session, from a client (`session/delete`), `/resume delete` or the selector, still removes it together with its artifacts.
 - `session/list` reports the mark as `_meta["nanocoder/pinned"]`, so a client can find marks it no longer needs. Clearing a mark counts as using the session, so it then gets a full `retentionDays` again.
 - `initialize` reports the limits retention applies as `_meta["nanocoder/retention"]`: `{"retentionDays": 30, "maxSessions": 100}`.
 
-Any client can clear any mark, and pinned sessions stay on disk until someone unpins or deletes them. The session list in the CLI and `nanocoder storage` do not show the mark yet, so for now it can only be seen and cleared through an ACP client. An older Nanocoder that shares the same store and does not know about the mark can still delete a pinned session.
+Any client can clear any mark, and pinned sessions stay on disk until someone unpins or deletes them. The CLI selector marks pinned sessions with `[pinned]` and can toggle the mark with Ctrl+P or `/resume pin`; `nanocoder storage` does not show it. An older Nanocoder that shares the same store and does not know about the mark can still delete a pinned session.
 
 ## Configuration
 

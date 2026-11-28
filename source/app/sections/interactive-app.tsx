@@ -637,6 +637,12 @@ export function InteractiveApp({
 									void appHandlers.handleSessionSelect(sessionId)
 								}
 								onSessionCancel={appHandlers.handleSessionCancel}
+								onSessionDelete={sessionId =>
+									appHandlers.deleteSession(sessionId)
+								}
+								onSessionPin={(sessionId, pinned) =>
+									appHandlers.setSessionPinned(sessionId, pinned)
+								}
 							/>
 						</Box>
 					)}

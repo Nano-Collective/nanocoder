@@ -125,6 +125,8 @@ function createCommandContext(
 		enterCheckpointLoadMode: options.onEnterCheckpointLoadMode,
 		enterSessionSelectorMode: options.onEnterSessionSelectorMode,
 		resumeSession: options.onResumeSession,
+		deleteSession: options.onDeleteSession,
+		setSessionPinned: options.onSetSessionPinned,
 		switchModel: options.onSwitchModel,
 		switchMode: options.onSwitchMode,
 		submitChatMessage: (message, displayValue) =>

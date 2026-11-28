@@ -343,3 +343,36 @@ test.serial('shrinks the window so the picker fits an 18-row terminal', t => {
 		process.stdout.rows = original;
 	}
 });
+
+test.serial('Ctrl+D acts on the highlighted row without filtering', async t => {
+	const deleted: string[] = [];
+	const {lastFrame, stdin, unmount} = renderWithTheme(
+		<FilterableSelectList
+			items={items}
+			onSelect={() => {}}
+			onDelete={value => deleted.push(value)}
+		/>,
+	);
+	stdin.write('\u0004'); // Ctrl+D
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(deleted, ['0']);
+	t.notRegex(lastFrame() ?? '', /Filter: d/);
+	unmount();
+});
+
+test.serial('Ctrl+P acts on the highlighted row after navigation', async t => {
+	const pinned: Array<[string, boolean]> = [];
+	const {stdin, unmount} = renderWithTheme(
+		<FilterableSelectList
+			items={items}
+			onSelect={() => {}}
+			onPin={value => pinned.push([value, true])}
+		/>,
+	);
+	stdin.write('\u001B[B'); // down to beta
+	await new Promise(resolve => setTimeout(resolve, 50));
+	stdin.write('\u0010'); // Ctrl+P
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(pinned, [['1', true]]);
+	unmount();
+});

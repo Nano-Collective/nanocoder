@@ -21,6 +21,10 @@ export interface FilterableSelectListProps<TValue extends string = string> {
 	initialSelectedValue?: TValue;
 	onSelect: (value: TValue) => void;
 	onCancel?: () => void;
+	/** Ctrl+D acts on the highlighted row. Omitted where rows are read-only. */
+	onDelete?: (value: TValue) => void;
+	/** Ctrl+P acts on the highlighted row. Omitted where rows are read-only. */
+	onPin?: (value: TValue) => void;
 }
 
 export function FilterableSelectList<TValue extends string = string>({
@@ -29,6 +33,8 @@ export function FilterableSelectList<TValue extends string = string>({
 	initialSelectedValue,
 	onSelect,
 	onCancel,
+	onDelete,
+	onPin,
 }: FilterableSelectListProps<TValue>) {
 	const {colors} = useTheme();
 	// Height-aware clamp: shrink the window so the whole picker still fits.
@@ -104,6 +110,18 @@ export function FilterableSelectList<TValue extends string = string>({
 			setHighlightedIndex(prev =>
 				Math.min(maxIndex, prev + effectiveVisibleCount),
 			);
+			return;
+		}
+		// Modifier keys are ignored by the filter-typing branch below, so these
+		// actions never steal letters from a title query.
+		if (key.ctrl && input === 'd' && onDelete) {
+			const item = filteredItems[safeHighlighted];
+			if (item) onDelete(item.value);
+			return;
+		}
+		if (key.ctrl && input === 'p' && onPin) {
+			const item = filteredItems[safeHighlighted];
+			if (item) onPin(item.value);
 			return;
 		}
 		if (key.return) {
