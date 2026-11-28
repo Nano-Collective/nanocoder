@@ -1,5 +1,6 @@
 import {randomBytes} from 'node:crypto';
 import React from 'react';
+import {pairUnansweredToolCalls} from '@/ai-sdk-client/converters/message-converter';
 import type {SettingsTabId} from '@/app/components/settings-constants';
 import {
 	createClearMessagesHandler,
@@ -631,7 +632,10 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// labelled, saved and priced as the resumed one.
 	const applySession = React.useCallback(
 		(session: Session) => {
-			updateMessages(session.messages);
+			// Sessions quit during tool confirmation can end with unanswered
+			// tool_calls; pair them before the next request hits the provider.
+			const messages = pairUnansweredToolCalls(session.messages);
+			updateMessages(messages);
 			// The resumed history has not seen this process's reads.
 			bumpReadContentGeneration();
 			setCurrentSessionId(session.id);
@@ -643,7 +647,7 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 			// what they resumed (prompts, assistant replies, tool activity) instead
 			// of an empty screen with only a success line.
 			for (const component of buildSessionHistoryComponents(
-				session.messages,
+				messages,
 				session.model,
 			)) {
 				addToChatQueue(component);
@@ -675,13 +679,9 @@ export function useAppHandlers(props: UseAppHandlersProps): AppHandlers {
 	// current client and labels stay.
 	const resumeSession = React.useCallback(
 		async (session: Session) => {
-			applySession(session);
-			await handleModelSelect(
-				session.provider,
-				session.model,
-				true,
-				session.messages,
-			);
+			const messages = pairUnansweredToolCalls(session.messages);
+			applySession({...session, messages});
+			await handleModelSelect(session.provider, session.model, true, messages);
 		},
 		[applySession, handleModelSelect],
 	);
