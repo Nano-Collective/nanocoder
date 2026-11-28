@@ -81,25 +81,31 @@ const binaryOnPathCache = new Map<string, boolean>();
  * surrounding quotes are stripped before the directory is stat-ed — without
  * that, git could be installed and working while this scan misses it.
  */
-function isBinaryOnPath(name: string): boolean {
-	const cached = binaryOnPathCache.get(name);
-	if (cached !== undefined) return cached;
-
-	const pathEntries = (process.env.PATH ?? '')
-		.split(delimiter)
-		.map(entry => entry.replace(/^"(.*)"$/, '$1'))
-		.filter(Boolean);
+/**
+ * Resolve an executable name to a full path without spawning a shell,
+ * applying PATHEXT on Windows. Returns undefined when nothing matches.
+ * Names that already contain a path separator are checked in place.
+ */
+export function resolveBinaryOnPath(name: string): string | undefined {
+	const hasDir = /[\\/]/.test(name);
+	const pathEntries = hasDir
+		? ['']
+		: (process.env.PATH ?? '')
+				.split(delimiter)
+				.map(entry => entry.replace(/^"(.*)"$/, '$1'))
+				.filter(Boolean);
 	const extensions =
 		process.platform === 'win32'
 			? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
 					.split(';')
 					.filter(Boolean)
 			: [''];
+	// A path that already carries its extension is tried as given first.
+	if (hasDir && process.platform === 'win32') extensions.unshift('');
 
-	let found = false;
 	for (const dir of pathEntries) {
 		for (const ext of extensions) {
-			const candidate = join(dir, name + ext);
+			const candidate = dir ? join(dir, name + ext) : name + ext;
 			try {
 				// Regular file only: a directory named like the binary must not
 				// count as an installed executable.
@@ -108,15 +114,19 @@ function isBinaryOnPath(name: string): boolean {
 				// checks the executable bit on Unix and is a no-op on Windows
 				// (where PATHEXT above does the equivalent filtering).
 				accessSync(candidate, constants.X_OK);
-				found = true;
-				break;
+				return candidate;
 			} catch {
 				// Missing, not a file, or not executable — keep looking.
 			}
 		}
-		if (found) break;
 	}
+	return undefined;
+}
 
+function isBinaryOnPath(name: string): boolean {
+	const cached = binaryOnPathCache.get(name);
+	if (cached !== undefined) return cached;
+	const found = resolveBinaryOnPath(name) !== undefined;
 	binaryOnPathCache.set(name, found);
 	return found;
 }
