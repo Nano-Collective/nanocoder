@@ -103,6 +103,7 @@ export default function ToolConfirmation({
 					// Leave as {} — the schema/validator will surface the real problem.
 				}
 
+				// runToolTurn prechecks interactive calls; subagents still use this.
 				// 1. Schema type-check — the same check the executed handler runs, so a
 				// wrong-typed argument shows red here and is fed back to the model.
 				const schema = getToolJsonSchema(

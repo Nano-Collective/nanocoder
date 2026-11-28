@@ -1,3 +1,4 @@
+import {Text} from 'ink';
 import React from 'react';
 import type {ToolExecutionOutcome} from '@/agent-loop/turn-engine';
 import type {ConversationStateManager} from '@/app/utils/conversation-state';
@@ -24,6 +25,7 @@ import {
 	createCancellationResults,
 } from '@/tools/runtime/tool-cancellation';
 import {signalToolConfirm} from '@/tools/runtime/tool-confirm-queue';
+import {precheckToolCall} from '@/tools/runtime/tool-validation';
 import {loadTasks} from '@/tools/tasks/storage';
 import type {Task} from '@/tools/tasks/types';
 import type {ToolManager} from '@/tools/tool-manager';
@@ -125,6 +127,42 @@ export interface ToolTurnContext {
 	flushAll: () => Promise<void>;
 	/** A task tool updated the live task list this turn. */
 	markLiveTaskUpdates: () => void;
+}
+
+/** Sentinel: the turn aborted while the precheck was still running. */
+const PRECHECK_ABORTED = Symbol('precheck-aborted');
+
+/**
+ * Schema-check and validate a call, but stop waiting as soon as `signal`
+ * aborts. The validator itself is not cancelled. A result that lands
+ * afterwards is ignored, so it cannot open a dialog or record a second
+ * tool result.
+ */
+async function precheckOrAbort(
+	toolManager: ToolManager | null,
+	toolCall: ToolCall,
+	signal: AbortSignal,
+): Promise<string | null | typeof PRECHECK_ABORTED> {
+	if (signal.aborted) return PRECHECK_ABORTED;
+
+	let onAbort: (() => void) | undefined;
+	const aborted = new Promise<typeof PRECHECK_ABORTED>(resolve => {
+		onAbort = () => resolve(PRECHECK_ABORTED);
+		signal.addEventListener('abort', onAbort, {once: true});
+	});
+
+	try {
+		const result = await Promise.race([
+			precheckToolCall(toolManager, toolCall),
+			aborted,
+		]);
+		// Abort wins even when the validator resolved in the same turn: the
+		// call is not going to run, and the late string must not be recorded.
+		if (result === PRECHECK_ABORTED || signal.aborted) return PRECHECK_ABORTED;
+		return result;
+	} finally {
+		if (onAbort) signal.removeEventListener('abort', onAbort);
+	}
 }
 
 /**
@@ -425,10 +463,10 @@ export async function runToolTurn(
 	// 3) Interactive confirmation: gate each remaining tool, execute on
 	//    approval. A decline cancels the rest and returns control to the user.
 	if (confirmTools.length > 0) {
-		// Flush accumulated auto-exec output before the prompt, and stop the
-		// thinking spinner so the confirmation UI renders cleanly.
+		// Flush accumulated auto-exec output before any prompt. Stay
+		// generating through the precheck so a slow validator does not look
+		// like a finished turn. Idle only once a dialog is about to show.
 		await flushAll();
-		setIsGenerating(false);
 		const {processToolUse} = await import('@/message-handler');
 		const processToolWithContext = (toolCall: ToolCall) =>
 			processToolUse(toolCall, {
@@ -437,12 +475,78 @@ export async function runToolTurn(
 				workingDirectory,
 			});
 
+		// Decline, abort during the prompt, and abort during the precheck
+		// all end here. This call and every one after it get the cancellation
+		// results, and the model is not asked again.
+		const stopDeclined = (fromIndex: number) => {
+			// Close any VS Code diff previews the formatter opened for the
+			// declined tools (the approve path self-closes post-execution).
+			closeAllDiffsInVSCode();
+			turnResults.push(
+				...createCancellationResults(confirmTools.slice(fromIndex)),
+			);
+			addToChatQueue(
+				<InfoMessage
+					key={generateKey('tool-cancelled')}
+					message="Tool execution cancelled by user."
+					hideBox={true}
+				/>,
+			);
+			// A precheck abort never reached the dialog, so the spinner is
+			// still up. A declined turn does not clear it on the way out.
+			setIsGenerating(false);
+			return {
+				kind: 'stop' as const,
+				payload: 'declined' as const,
+				results: turnResults,
+			};
+		};
+
 		for (let i = 0; i < confirmTools.length; i++) {
 			const toolCall = confirmTools[i];
+			if (signal.aborted) return stopDeclined(i);
 			// Don't ask about a tool a mode switch has since hidden.
 			const notOffered = notOfferedReason(toolCall);
 			if (notOffered) {
 				refuseToolCall(toolCall, notOffered);
+				turnResults.push(blockedResults[blockedResults.length - 1]);
+				continue;
+			}
+			// Reject a call that cannot run before asking. Checked here, after
+			// the auto batch, so a read_file earlier in this turn still counts.
+			// Subagent approvals (tool-approval-queue.ts) do not use this loop.
+			// A previous dialog idled the spinner; checking the next call is
+			// still this turn, so keep it busy until that dialog is next.
+			setIsGenerating(true);
+			const validationError = await precheckOrAbort(
+				toolManager,
+				toolCall,
+				signal,
+			);
+			if (validationError === PRECHECK_ABORTED) return stopDeclined(i);
+			if (validationError) {
+				turnResults.push({
+					tool_call_id: toolCall.id,
+					role: 'tool',
+					name: toolCall.function.name,
+					content: validationError,
+					isError: true,
+				});
+				addToChatQueue(
+					<Text key={generateKey('tool-rejected')} dimColor>
+						{`${toolCall.function.name} rejected: ${validationError.split('\n')[0]}`}
+					</Text>,
+				);
+				continue;
+			}
+			// The dialog replaces the spinner. Idle only once this call can
+			// run. The not-offered check is repeated after the idle
+			// transition: that is when a mode switch made as the prompt comes
+			// up becomes visible, and that switch must still skip the dialog.
+			setIsGenerating(false);
+			const hiddenNow = notOfferedReason(toolCall);
+			if (hiddenNow) {
+				refuseToolCall(toolCall, hiddenNow);
 				turnResults.push(blockedResults[blockedResults.length - 1]);
 				continue;
 			}
@@ -454,23 +558,7 @@ export async function runToolTurn(
 
 			// Approved, but the turn was cancelled while the prompt was up:
 			// treat it like a decline rather than running the tool.
-			if (!approved || signal.aborted) {
-				// Close any VS Code diff previews the formatter opened for the
-				// declined tools (the approve path self-closes post-execution).
-				closeAllDiffsInVSCode();
-				// Record cancellation results for this tool and every remaining
-				// one (keeps tool_call/result pairing intact), then stop without
-				// re-prompting the model.
-				turnResults.push(...createCancellationResults(confirmTools.slice(i)));
-				addToChatQueue(
-					<InfoMessage
-						key={generateKey('tool-cancelled')}
-						message="Tool execution cancelled by user."
-						hideBox={true}
-					/>,
-				);
-				return {kind: 'stop', payload: 'declined', results: turnResults};
-			}
+			if (!approved || signal.aborted) return stopDeclined(i);
 
 			// Approved: execute + display through the same primitives the auto
 			// batch uses. isGenerating is true so the live area renders and the
