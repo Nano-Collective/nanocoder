@@ -13,6 +13,8 @@ import {getSubagentSession} from '@/services/subagent-session-store';
 interface SubagentViewProps {
 	agentId: string;
 	onDetach: () => void;
+	/** Cancels the running turn, which also stops the subagent. */
+	onCancel?: () => void;
 	reasoningExpanded: boolean;
 	altScreenActive?: boolean;
 }
@@ -20,6 +22,7 @@ interface SubagentViewProps {
 export function SubagentView({
 	agentId,
 	onDetach,
+	onCancel,
 	reasoningExpanded,
 	altScreenActive = false,
 }: SubagentViewProps) {
@@ -32,8 +35,14 @@ export function SubagentView({
 		return () => clearInterval(interval);
 	}, []);
 
-	useInput((_input, key) => {
+	// Esc only goes back to the chat. Ctrl+C stops the turn first; App.tsx
+	// leaves Ctrl+C to this view while it is open.
+	useInput((input, key) => {
 		if (key.escape) {
+			onDetach();
+		}
+		if (key.ctrl && input === 'c') {
+			onCancel?.();
 			onDetach();
 		}
 	});

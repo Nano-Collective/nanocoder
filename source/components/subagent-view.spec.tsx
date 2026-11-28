@@ -131,6 +131,34 @@ test.serial('detaches when the session no longer exists', async t => {
 	unmount();
 });
 
+// App.tsx leaves Ctrl+C to this view while it is open.
+test.serial('Ctrl+C cancels the turn and detaches; Esc only detaches', async t => {
+	initSubagentSession('agent-a', 'explorer', [
+		{role: 'user', content: 'find the auth flow'},
+	]);
+	const calls: string[] = [];
+	const {stdin, unmount} = render(
+		wrap(
+			<SubagentView
+				agentId="agent-a"
+				onDetach={() => calls.push('detach')}
+				onCancel={() => calls.push('cancel')}
+				reasoningExpanded={false}
+			/>,
+		),
+	);
+	t.teardown(unmount);
+	await tick();
+
+	stdin.write('\u001B'); // Esc
+	await new Promise(resolve => setTimeout(resolve, 50));
+	t.deepEqual(calls, ['detach']);
+
+	stdin.write('\u0003'); // Ctrl+C
+	await tick();
+	t.deepEqual(calls, ['detach', 'cancel', 'detach']);
+});
+
 // Regression: the tool line sliced every result to 100 characters and
 // appended "..." unconditionally, so a short result like "OK" rendered
 // as "OK..." and implied output that was never truncated. The ellipsis

@@ -1,6 +1,13 @@
 import {Box, Text, useFocus, useInput} from 'ink';
 import Spinner from 'ink-spinner';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {
+	type Ref,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react';
 import {AttachmentPills} from '@/components/composer/attachment-pills';
 import {CommandCompletionList} from '@/components/composer/command-completion-list';
 import {FileMentionList} from '@/components/composer/file-mention-list';
@@ -63,7 +70,16 @@ interface MentionWarning {
 	text: string;
 }
 
+/** Lets the app's Ctrl+C / Ctrl+D handler read and clear the prompt. */
+export type ComposerHandle = {
+	/** Leaves reverse search, or clears the typed text undoably. False if empty. */
+	clearDraft: () => boolean;
+	/** No typed text and no image attachments. */
+	isEmpty: () => boolean;
+};
+
 interface ChatProps {
+	ref?: Ref<ComposerHandle>;
 	onSubmit?: (
 		message: string,
 		displayValue: string,
@@ -118,6 +134,7 @@ interface ChatProps {
 }
 
 export default function UserInput({
+	ref,
 	onSubmit,
 	onQueueMessage,
 	queuedMessages = [],
@@ -491,6 +508,28 @@ export default function UserInput({
 		queue.resetSelection,
 		updateMentionWarning,
 	]);
+
+	// Ctrl+C clears only the typed text, as one undoable edit, so Ctrl+Z
+	// brings back exactly what it cleared. Attachments and the editor pill
+	// stay (Esc Esc clears those).
+	useImperativeHandle(ref, () => ({
+		clearDraft: () => {
+			// Like readline, Ctrl+C first leaves reverse search, as Esc does.
+			if (reverseSearch.isActive) {
+				const {restore} = reverseSearch.cancel();
+				if (restore) setInputState(restore);
+				setTextInputKey(prev => prev + 1);
+				return true;
+			}
+			if (!currentStateRef.current.displayValue) return false;
+			resetInput(true);
+			setShowClearMessage(false);
+			return true;
+		},
+		// An image-only draft is not empty: Ctrl+D must not exit and lose it.
+		isEmpty: () =>
+			!currentStateRef.current.displayValue && attachments.length === 0,
+	}));
 
 	// Handle escape key logic
 	const handleEscape = useCallback(() => {

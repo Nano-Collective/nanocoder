@@ -84,16 +84,21 @@ export function useReverseSearch() {
 		showMatch(findReverseMatch(history, '', history.length - 1));
 	};
 
+	/** Leave the search and put the draft back. Escape, and Ctrl+C via App. */
+	const cancel = (): ReverseSearchExit => {
+		exit();
+		return {restore: draftRef.current};
+	};
+
 	/**
 	 * Handle a key while the search is active. Returns how the search ended,
 	 * or null when it is still running. Every key is consumed.
 	 */
 	const handleKey = (input: string, key: Key): ReverseSearchExit | null => {
-		// Ctrl+C is deliberately not handled here: App.tsx's global handler
-		// exits the app on it, so it can't double as "cancel search".
+		// Ctrl+C is not handled here: App.tsx routes it to the composer's
+		// clearDraft, which calls cancel().
 		if (key.escape) {
-			exit();
-			return {restore: draftRef.current};
+			return cancel();
 		}
 
 		if (key.return) {
@@ -137,5 +142,5 @@ export function useReverseSearch() {
 		return null;
 	};
 
-	return {isActive, query, match, start, handleKey};
+	return {isActive, query, match, start, handleKey, cancel};
 }

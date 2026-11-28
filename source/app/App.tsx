@@ -9,8 +9,12 @@ import {
 	useUserSubmit,
 	useVSCodePromptDispatcher,
 } from '@/app/hooks/useVSCodePromptHandling';
-import {InteractiveApp} from '@/app/sections/interactive-app';
+import {
+	InteractiveApp,
+	type InteractiveAppHandle,
+} from '@/app/sections/interactive-app';
 import type {AppProps} from '@/app/types';
+import {isExitKeyPress} from '@/app/utils/exit-keys';
 import AssistantReasoning from '@/components/assistant-reasoning';
 import {SuccessMessage, WarningMessage} from '@/components/message-box';
 import {setGlobalMessageQueue} from '@/components/message-queue';
@@ -169,8 +173,18 @@ export default function App({
 
 	// Ink's built-in exitOnCtrlC is disabled (cli.tsx) so Ctrl+C can run
 	// the same graceful path as /exit instead of abandoning the last frame.
+	// isExitKeyPress decides when Ctrl+C / Ctrl+D exit.
+	const interactiveAppRef = React.useRef<InteractiveAppHandle>(null);
 	useInput((input, key) => {
-		if (key.ctrl && input === 'c') {
+		if (
+			isExitKeyPress(input, key, {
+				exiting: isExitingRef.current,
+				// The rendered value, not attachedAgentIdRef: SubagentView may
+				// detach (and clear the ref) earlier in this same keypress.
+				subagentAttached: appState.attachedAgentId !== null,
+				chat: interactiveAppRef.current,
+			})
+		) {
 			handleExit();
 		}
 		if (key.ctrl && input === 's') {
@@ -903,11 +917,13 @@ export default function App({
 						<SubagentView
 							agentId={appState.attachedAgentId}
 							onDetach={() => changeAttachedAgent(null)}
+							onCancel={appHandlers.handleCancel}
 							reasoningExpanded={appState.reasoningExpanded}
 							altScreenActive={altScreenActive}
 						/>
 					) : (
 						<InteractiveApp
+							ref={interactiveAppRef}
 							altScreenActive={altScreenActive}
 							appState={appState}
 							chatHandler={chatHandler}

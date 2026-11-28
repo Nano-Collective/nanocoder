@@ -3,6 +3,7 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
+import {useInput} from 'ink';
 import {render} from 'ink-testing-library';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
@@ -15,7 +16,8 @@ import {pasteEvents} from '../terminal/terminal-paste';
 import {KEYBOARD_SHORTCUTS} from './composer/keymap';
 import {SHORTCUTS_OVERHEAD_ROWS} from './composer/useShortcutsOverlay';
 import {findReverseMatch} from './composer/useReverseSearch';
-import UserInput from './user-input';
+import {isExitKeyPress} from '../app/utils/exit-keys';
+import UserInput, {type ComposerHandle} from './user-input';
 import {getClosestConfigFile} from '../config/index';
 import {promptHistory} from '../prompt-history';
 
@@ -362,10 +364,12 @@ const shortcutsWindow = (rows: number, start: number) => {
 };
 const escapeRegExp = (value: string) =>
 	value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+// Matches the start of the row: a long row is cut with "…" to fit the box,
+// and 40 characters always fit and still tell every row apart.
 const shortcutRow = (index: number) => {
 	const entry = KEYBOARD_SHORTCUTS.at(index);
 	if (!entry) throw new Error(`No shortcut at index ${index}`);
-	return new RegExp(escapeRegExp(`${entry[0]} — ${entry[1]}`));
+	return new RegExp(escapeRegExp(`${entry[0]} — ${entry[1]}`.slice(0, 40)));
 };
 
 test.serial('UserInput fits the shortcuts overlay and its close hint on a short terminal', async t => {
@@ -2802,6 +2806,83 @@ test.serial('UserInput cancels reverse search on Escape and restores original dr
 	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
 	t.regex(lastFrame()!, /my in-progress draft/);
 	unmount();
+});
+
+// App.tsx routes Ctrl+C to clearDraft (see InteractiveApp).
+test.serial('UserInput clearDraft leaves reverse search like Escape, then clears the draft', async t => {
+	await resetPromptHistory();
+	promptHistory.addPrompt('history command to ignore');
+	await promptHistory.saveHistory();
+
+	const composer = React.createRef<ComposerHandle>();
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<UserInput ref={composer} forceFocus={true} />
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+
+	stdin.write('my in-progress draft');
+	await waitForFrame(lastFrame, /my in-progress draft/);
+	stdin.write('\u0012'); // Ctrl+R
+	await waitForFrame(lastFrame, /\(reverse-i-search\)`/);
+
+	t.true(composer.current!.clearDraft());
+	await wait(50);
+	t.notRegex(lastFrame()!, /\(reverse-i-search\)/);
+	t.regex(lastFrame()!, /my in-progress draft/);
+
+	// The next press clears the draft itself; with nothing left it reports false.
+	t.true(composer.current!.clearDraft());
+	await wait(50);
+	t.notRegex(lastFrame()!, /my in-progress draft/);
+	t.false(composer.current!.clearDraft());
+});
+
+test.serial('Ctrl+D does not exit while the draft holds only an image attachment', async t => {
+	const composer = React.createRef<ComposerHandle>();
+	let exits = 0;
+	// App.tsx's routing, with InteractiveApp's promptIsEmpty reading this composer.
+	const AppKeys = () => {
+		useInput((input, key) => {
+			const chat = {
+				handleCtrlC: () => true,
+				promptIsEmpty: () => composer.current?.isEmpty() ?? false,
+			};
+			if (isExitKeyPress(input, key, {exiting: false, subagentAttached: false, chat})) {
+				exits++;
+			}
+		});
+		return (
+			<UserInput
+				ref={composer}
+				forceFocus={true}
+				restoreSubmittedDraft={{
+					id: 1,
+					inputState: {displayValue: '', placeholderContent: {}},
+					attachments: [{data: 'abc', mediaType: 'image/png'}],
+				}}
+			/>
+		);
+	};
+	const {stdin, lastFrame, unmount} = render(
+		<TestWrapper>
+			<AppKeys />
+		</TestWrapper>,
+	);
+	t.teardown(unmount);
+	await waitForFrame(lastFrame, /\[image #1/);
+
+	stdin.write('\u0004'); // Ctrl+D
+	await wait(50);
+	t.is(exits, 0);
+	t.regex(lastFrame()!, /\[image #1/);
+
+	stdin.write('\u0018'); // Ctrl+X removes the image, leaving the prompt empty
+	await waitForCondition(() => !/\[image #1/.test(lastFrame() ?? ''));
+	stdin.write('\u0004');
+	await wait(50);
+	t.is(exits, 1);
 });
 
 test.serial('UserInput shows failed reverse search and handles backspace in search mode', async t => {

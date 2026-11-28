@@ -1,5 +1,5 @@
 import test from 'ava';
-import {Text} from 'ink';
+import {Text, useInput} from 'ink';
 import React from 'react';
 import {DELAY_COMMAND_COMPLETE_MS} from '@/constants';
 import {useUserMessageQueue} from '@/hooks/useUserMessageQueue';
@@ -9,7 +9,8 @@ import {SHORTCUTS_OVERHEAD_ROWS} from '@/components/composer/useShortcutsOverlay
 import type {Task} from '@/tools/tasks/types';
 import type {Message} from '@/types';
 import {renderWithTheme} from '../../test-utils/render-with-theme.js';
-import {InteractiveApp} from './interactive-app.js';
+import {isExitKeyPress} from '../utils/exit-keys.js';
+import {InteractiveApp, type InteractiveAppHandle} from './interactive-app.js';
 
 console.log(`\ninteractive-app.spec.tsx – ${React.version}`);
 
@@ -1019,6 +1020,189 @@ test('Escape does NOT hijack tool confirmation (decline owns it)', async t => {
 
 	await pressEscape(stdin);
 	t.is(cancelled, 0);
+});
+
+// ============================================================================
+// Ctrl+C: cancel, then clear the prompt, then a second press exits
+// ============================================================================
+
+// Real keypresses through the same routing App.tsx uses (isExitKeyPress), so
+// every useInput listener sees each key as it does in the app.
+const renderForCtrlKeys = async (
+	t: {teardown: (fn: () => void) => void},
+	overrides: Overrides,
+) => {
+	const ref = React.createRef<InteractiveAppHandle>();
+	let exits = 0;
+	const AppKeys = () => {
+		useInput((input, key) => {
+			if (
+				isExitKeyPress(input, key, {
+					exiting: false,
+					subagentAttached: false,
+					chat: ref.current,
+				})
+			) {
+				exits++;
+			}
+		});
+		return <InteractiveApp ref={ref} {...makeProps(overrides)} />;
+	};
+	const rendered = renderWithTheme(<AppKeys />);
+	t.teardown(rendered.unmount);
+	await waitForCondition(() => ref.current !== null);
+	const press = async (sequence: string) => {
+		rendered.stdin.write(sequence);
+		await tickInteractive();
+	};
+	const frameHas = (pattern: RegExp) => pattern.test(rendered.lastFrame() ?? '');
+	return {...rendered, press, frameHas, exits: () => exits};
+};
+
+const CTRL_C = '\u0003';
+const CTRL_D = '\u0004';
+const EXIT_HINT = /Press Ctrl\+C again to exit/;
+
+test('Ctrl+C cancels in-flight generation like Escape and does not exit', async t => {
+	let cancelled = 0;
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		isGenerating: true,
+		handleCancel: () => {
+			cancelled++;
+		},
+	});
+
+	await press(CTRL_C);
+	t.is(cancelled, 1);
+	t.is(exits(), 0);
+	t.false(frameHas(EXIT_HINT));
+});
+
+test('Ctrl+C cancels the turn behind a tool confirmation, where Escape only declines', async t => {
+	let cancelled = 0;
+	const {press, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		isToolConfirmationMode: true,
+		abortController: new AbortController(),
+		pendingToolCalls: [{id: 't1', function: {name: 'write_file', arguments: {}}}],
+		handleCancel: () => {
+			cancelled++;
+		},
+	});
+
+	await press(CTRL_C);
+	t.is(cancelled, 1);
+	t.is(exits(), 0);
+});
+
+test('Ctrl+C while a cancel is already in flight asks for a second press instead of cancelling again', async t => {
+	// A turn that ignores the abort (e.g. a hung tool) must not trap the user.
+	let cancelled = 0;
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		client: {},
+		isCancelling: true,
+		abortController: new AbortController(),
+		handleCancel: () => {
+			cancelled++;
+		},
+	});
+
+	await press(CTRL_C);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	await press(CTRL_C);
+	t.is(cancelled, 0);
+	t.is(exits(), 1);
+});
+
+test('Ctrl+C clears a typed prompt, Ctrl+Z brings it back, and nothing exits', async t => {
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		client: {},
+	});
+	await press('half-written prompt');
+	await waitForCondition(() => frameHas(/half-written prompt/));
+
+	await press(CTRL_C);
+	await waitForCondition(() => !frameHas(/half-written prompt/));
+	t.false(frameHas(EXIT_HINT));
+
+	await press('\u001A'); // Ctrl+Z
+	await waitForCondition(() => frameHas(/half-written prompt/));
+	t.is(exits(), 0);
+});
+
+test('Ctrl+C on an empty idle prompt shows the hint, and only a second press exits', async t => {
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		client: {},
+	});
+
+	await press(CTRL_C);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	t.is(exits(), 0);
+	await press(CTRL_C);
+	t.is(exits(), 1);
+});
+
+test('another key between Ctrl+C presses resets the exit window', async t => {
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		client: {},
+	});
+
+	await press(CTRL_C);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	await press('\u000F'); // Ctrl+O: not text, so the prompt stays empty
+	await waitForCondition(() => !frameHas(EXIT_HINT));
+
+	await press(CTRL_C);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	t.is(exits(), 0);
+});
+
+test('the exit hint expires, so a late second Ctrl+C is a first press again', async t => {
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		client: {},
+	});
+
+	await press(CTRL_C);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	await waitForCondition(() => !frameHas(EXIT_HINT), 3000);
+	await press(CTRL_C);
+	await waitForCondition(() => frameHas(EXIT_HINT));
+	t.is(exits(), 0);
+});
+
+test('Ctrl+D exits from an empty prompt but not from one with text', async t => {
+	const {press, frameHas, exits} = await renderForCtrlKeys(t, {
+		startChat: true,
+		client: {},
+	});
+
+	await press('not done yet');
+	await waitForCondition(() => frameHas(/not done yet/));
+	await press(CTRL_D);
+	t.is(exits(), 0);
+	t.true(frameHas(/not done yet/));
+
+	await press(CTRL_C); // clears the text
+	await waitForCondition(() => !frameHas(/not done yet/));
+	await press(CTRL_D);
+	t.is(exits(), 1);
+});
+
+test('Ctrl+D does not exit while no prompt is on screen', async t => {
+	// startChat false hides the composer (see 'does not render ChatInput...').
+	const {press, exits} = await renderForCtrlKeys(t, {
+		startChat: false,
+		client: {},
+	});
+
+	await press(CTRL_D);
+	t.is(exits(), 0);
 });
 
 // ============================================================================
