@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat} from 'node:fs/promises';
+import {access, lstat, realpath} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import React from 'react';
 import {getColors} from '@/config/index';
@@ -21,11 +21,14 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
+	forgetVisibilityReceipt,
 	getLineNumbersForText,
 	hasSeenFile,
 	hasVisibleLines,
 	markFileSeen,
+	matchesFileSnapshot,
 	recordEditVisibility,
+	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
@@ -38,7 +41,7 @@ import {
 	isVSCodeConnected,
 	sendFileChangeToVSCode,
 } from '@/vscode/index';
-
+import {matchesCurrentFileContent} from './file-snapshot';
 import {formatStringReplacePreview} from './string-replace-preview';
 
 interface StringReplaceArgs {
@@ -118,6 +121,8 @@ const executeStringReplace = async (
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const hadMatchingSnapshot =
+		matchesFileSnapshot(absPath, fileContent) === true;
 	const {oldStr: old_str, newStr: new_str} = fitEditToLineEndings(
 		fileContent,
 		args.old_str,
@@ -149,7 +154,35 @@ const executeStringReplace = async (
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await atomicWriteUserFile(absPath, newContent);
+	const expectedTargetPath = await realpath(absPath);
+	const staleFileError = () =>
+		new Error(
+			`File "${path}" changed since it was read. Re-read it before editing.`,
+		);
+	if (
+		!(await matchesCurrentFileContent(absPath, fileContent, expectedTargetPath))
+	) {
+		invalidateCache(absPath);
+		forgetReadContent(absPath);
+		forgetVisibilityReceipt(absPath);
+		throw staleFileError();
+	}
+
+	await atomicWriteUserFile(absPath, newContent, async targetPath => {
+		if (
+			targetPath !== expectedTargetPath ||
+			!(await matchesCurrentFileContent(
+				absPath,
+				fileContent,
+				expectedTargetPath,
+			))
+		) {
+			invalidateCache(absPath);
+			forgetReadContent(absPath);
+			forgetVisibilityReceipt(absPath);
+			throw staleFileError();
+		}
+	});
 	invalidateCache(absPath);
 	// The model now knows the file's current contents, so a follow-up edit is
 	// not blind.
@@ -160,6 +193,7 @@ const executeStringReplace = async (
 	// rest of what the agent had read forward instead of forgetting it.
 	try {
 		const stats = await lstat(absPath);
+		if (hadMatchingSnapshot) rememberFileSnapshot(absPath, newContent);
 		const editStart = fileContent
 			.slice(0, fileContent.indexOf(old_str))
 			.split('\n').length;
@@ -169,6 +203,7 @@ const executeStringReplace = async (
 			editStart,
 			old_str.split('\n').length,
 			new_str.split('\n').length,
+			newContent,
 		);
 	} catch {
 		// If stat fails, fall back to file-level tracking only

@@ -1,5 +1,5 @@
 import {constants, existsSync} from 'node:fs';
-import {access, lstat, readFile} from 'node:fs/promises';
+import {access, lstat, open, readFile, realpath, stat} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -28,12 +28,19 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import {
+	clearStaleFilePath,
+	forgetFileState,
 	forgetReadContent,
 	forgetVisibilityReceipt,
+	hasFileSnapshot,
 	hasSeenFile,
+	hasStaleFilePath,
 	hasVisibleLines,
 	markFileSeen,
+	matchesFileSnapshot,
+	matchesVisibilityContent,
 	recordVisibilityReceipt,
+	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
@@ -58,6 +65,98 @@ import {
 // never runs).
 const previousContentCache = new Map<string, string | null>();
 
+/** Check the full snapshot when present; otherwise verify scoped visibility and version. */
+async function matchesCurrentReadState(
+	absPath: string,
+	expectedTargetPath?: string,
+): Promise<boolean> {
+	try {
+		if (
+			expectedTargetPath !== undefined &&
+			(await realpath(absPath)) !== expectedTargetPath
+		) {
+			return false;
+		}
+
+		if (!hasFileSnapshot(absPath)) {
+			const initialStats = await stat(absPath);
+			const cached = await getCachedFileContent(absPath);
+			let handle: Awaited<ReturnType<typeof open>> | undefined;
+			try {
+				handle = await open(absPath, 'r');
+				const fileStats = await handle.stat();
+				const content = await handle.readFile();
+				const currentStats = await stat(absPath);
+				if (
+					initialStats.dev !== fileStats.dev ||
+					initialStats.ino !== fileStats.ino ||
+					initialStats.mtimeMs !== fileStats.mtimeMs ||
+					initialStats.size !== fileStats.size ||
+					fileStats.dev !== currentStats.dev ||
+					fileStats.ino !== currentStats.ino ||
+					fileStats.mtimeMs !== currentStats.mtimeMs ||
+					fileStats.size !== currentStats.size
+				) {
+					return false;
+				}
+				// The cache is process-wide, but visible ranges are agent-scoped.
+				// Compare against the digest captured with this scope's read receipt.
+				if (matchesVisibilityContent(absPath, content) === false) return false;
+				const allLines = Array.from(
+					{length: cached.totalLines},
+					(_, index) => index + 1,
+				);
+				if (!hasVisibleLines(absPath, currentStats, allLines).visible)
+					return false;
+				return (
+					expectedTargetPath === undefined ||
+					(await realpath(absPath)) === expectedTargetPath
+				);
+			} finally {
+				await handle?.close().catch(() => {});
+			}
+		}
+
+		let handle: Awaited<ReturnType<typeof open>> | undefined;
+		try {
+			handle = await open(absPath, 'r');
+			const fileStats = await handle.stat();
+			const content = await handle.readFile();
+			const pathStats = await stat(absPath);
+			if (fileStats.dev !== pathStats.dev || fileStats.ino !== pathStats.ino) {
+				return false;
+			}
+			if (
+				expectedTargetPath !== undefined &&
+				(await realpath(absPath)) !== expectedTargetPath
+			) {
+				return false;
+			}
+			return matchesFileSnapshot(absPath, content) === true;
+		} finally {
+			await handle?.close().catch(() => {});
+		}
+	} catch {
+		return false;
+	}
+}
+
+function invalidateStaleReadState(absPath: string): void {
+	forgetFileState(absPath);
+	invalidateCache(absPath);
+}
+
+function staleSnapshotError(path: string): string {
+	return `File "${path}" has changed since it was read. Re-read its current contents with read_file using explicit start_line and end_line ranges; if it is large, continue with the range suggested by the preview before overwriting it.`;
+}
+
+function staleReadError(path: string, absPath: string): string {
+	if (!existsSync(absPath)) {
+		return `File "${path}" is no longer available at this path after it was read. This write was blocked to avoid silently recreating a missing target. Confirm the path's state; retry only if you intend to create the file.`;
+	}
+	return staleSnapshotError(path);
+}
+
 const executeWriteFile = async (args: {
 	path: string;
 	content: unknown; // Note: change type to unknown to accept non-string
@@ -68,7 +167,15 @@ const executeWriteFile = async (args: {
 	}
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
+	if (hasStaleFilePath(absPath)) {
+		clearStaleFilePath(absPath);
+		throw new Error(staleReadError(args.path, absPath));
+	}
 	const fileExists = existsSync(absPath);
+	if (!fileExists && hasSeenFile(absPath)) {
+		invalidateStaleReadState(absPath);
+		throw new Error(staleReadError(args.path, absPath));
+	}
 
 	if (fileExists) {
 		let cached: Awaited<ReturnType<typeof getCachedFileContent>> | undefined;
@@ -126,7 +233,35 @@ const executeWriteFile = async (args: {
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await atomicWriteUserFile(absPath, content);
+	let expectedTargetPath: string | undefined;
+	if (fileExists) {
+		if (!(await matchesCurrentReadState(absPath))) {
+			invalidateStaleReadState(absPath);
+			throw new Error(staleReadError(args.path, absPath));
+		}
+		expectedTargetPath = await realpath(absPath);
+	}
+
+	await atomicWriteUserFile(absPath, content, async targetPath => {
+		if (!fileExists) {
+			// Do not turn a path that appeared while the approval UI was open into
+			// an unreviewed overwrite.
+			if (existsSync(absPath)) {
+				throw new Error(
+					`File "${args.path}" appeared after this write was approved. Read it before overwriting it.`,
+				);
+			}
+			return;
+		}
+
+		if (
+			targetPath !== expectedTargetPath ||
+			!(await matchesCurrentReadState(absPath, targetPath))
+		) {
+			invalidateStaleReadState(absPath);
+			throw new Error(staleReadError(args.path, absPath));
+		}
+	});
 
 	// Invalidate cache after write
 	invalidateCache(absPath);
@@ -139,7 +274,7 @@ const executeWriteFile = async (args: {
 	try {
 		const stats = await lstat(absPath);
 		// Full file visibility (undefined start/end means entire file)
-		recordVisibilityReceipt(absPath, stats, undefined, undefined);
+		recordVisibilityReceipt(absPath, stats, undefined, undefined, content);
 	} catch {
 		// If stat fails, fall back to file-level tracking only
 	}
@@ -147,7 +282,11 @@ const executeWriteFile = async (args: {
 	// Read back to verify the write succeeded (but don't echo the content back
 	// to the model — it just sent us that exact content as the tool call
 	// arguments, so returning it again is pure duplication).
-	const actualContent = await readFile(absPath, 'utf-8');
+	const actualBytes = await readFile(absPath);
+	const actualContent = actualBytes.toString('utf-8');
+	// Store the content we committed, not a later external edit that raced with
+	// the read-back.
+	rememberFileSnapshot(absPath, content);
 	const lineCount = actualContent.split('\n').length;
 	const charCount = actualContent.length;
 	const estimatedTokens = estimateTokens(actualContent);
@@ -490,6 +629,14 @@ const writeFileValidator = async (args: {
 	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
+	// The approval preview and execution wrapper both run this validator. Keep
+	// stale-path state intact here; executeWriteFile consumes it authoritatively.
+	const stalePath = hasStaleFilePath(absPath);
+	const fileExists = existsSync(absPath);
+	if (!stalePath && !fileExists && hasSeenFile(absPath)) {
+		invalidateStaleReadState(absPath);
+		return {valid: false, error: staleReadError(args.path, absPath)};
+	}
 
 	// Check if parent directory exists
 	const parentDir = dirname(absPath);
@@ -524,7 +671,7 @@ const writeFileValidator = async (args: {
 	// file the model has already read (or previously written) is allowed. This
 	// preserves the legitimate read-then-rewrite path while blocking blind
 	// overwrites that would destroy contents the model never looked at.
-	if (existsSync(absPath) && !hasSeenFile(absPath)) {
+	if (fileExists && !hasSeenFile(absPath) && !stalePath) {
 		return {
 			valid: false,
 			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — so you don't discard existing content, then retry. For small changes, prefer string_replace over a full overwrite.`,
@@ -534,7 +681,7 @@ const writeFileValidator = async (args: {
 	// Line-level visibility check for overwrites: if the file exists and has been
 	// seen at the file level, ensure the agent has actually read the content
 	// being overwritten. This prevents partial reads followed by blind overwrites.
-	if (existsSync(absPath) && hasSeenFile(absPath)) {
+	if (fileExists && hasSeenFile(absPath)) {
 		try {
 			const stats = await lstat(absPath);
 			const cached = await getCachedFileContent(absPath);
@@ -564,6 +711,17 @@ const writeFileValidator = async (args: {
 			if (!encodingResult.valid) return encodingResult;
 		} catch {
 			// Unreadable files surface their own error at execute time.
+		}
+	}
+
+	if (existsSync(absPath)) {
+		const snapshotMatches = await matchesCurrentReadState(absPath);
+		if (!snapshotMatches) {
+			invalidateStaleReadState(absPath);
+			return {
+				valid: false,
+				error: staleReadError(args.path, absPath),
+			};
 		}
 	}
 

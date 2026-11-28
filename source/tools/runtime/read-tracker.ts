@@ -1,4 +1,5 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {createHash} from 'node:crypto';
 import {statSync} from 'node:fs';
 import {resolve} from 'node:path';
 
@@ -24,6 +25,7 @@ import {resolve} from 'node:path';
  * remains the backstop for stale reads.
  */
 const seenFiles = new Set<string>();
+const staleFilePaths = new Set<string>();
 
 type ReadContentEntry = {
 	mtimeMs: number;
@@ -35,7 +37,12 @@ type ReadContentEntry = {
 type ReadContentScope = {
 	generation: number;
 	files: Map<string, ReadContentEntry>;
+	fileSnapshots: Map<string, FileSnapshot>;
 	visibilityReceipts: Map<string, VisibilityReceipt>;
+};
+
+type FileSnapshot = {
+	digest: string;
 };
 
 type LineRange = {
@@ -47,6 +54,8 @@ type VisibilityReceipt = {
 	mtimeMs: number;
 	size: number;
 	generation: number;
+	/** Hash of the complete bytes underlying the content shown for these ranges. */
+	contentDigest?: string;
 	/** Line ranges the agent has actually seen. Empty array means full file. */
 	visibleRanges: LineRange[];
 };
@@ -62,7 +71,12 @@ function currentReadScopeId(): string {
 function getReadContentScope(scopeId = currentReadScopeId()): ReadContentScope {
 	let scope = readContentScopes.get(scopeId);
 	if (!scope) {
-		scope = {generation: 0, files: new Map(), visibilityReceipts: new Map()};
+		scope = {
+			generation: 0,
+			files: new Map(),
+			fileSnapshots: new Map(),
+			visibilityReceipts: new Map(),
+		};
 		readContentScopes.set(scopeId, scope);
 	}
 	return scope;
@@ -78,7 +92,26 @@ function readContentKey(
 
 /** Record that a file's contents have been seen this session (read or written). */
 export function markFileSeen(absPath: string): void {
-	seenFiles.add(resolve(absPath));
+	const path = resolve(absPath);
+	seenFiles.add(path);
+}
+
+/** Require a fresh read after a file operation removes or relocates a path. */
+export function markFilePathStale(absPath: string): void {
+	const path = resolve(absPath);
+	const wasSeen = seenFiles.has(path);
+	forgetFileState(path);
+	if (wasSeen) staleFilePaths.add(path);
+}
+
+/** Whether a file operation invalidated this path until the next explicit read. */
+export function hasStaleFilePath(absPath: string): boolean {
+	return staleFilePaths.has(resolve(absPath));
+}
+
+/** Clear the one-time stale-path warning after it has been returned to the model. */
+export function clearStaleFilePath(absPath: string): void {
+	staleFilePaths.delete(resolve(absPath));
 }
 
 /**
@@ -88,6 +121,7 @@ export function markFileSeen(absPath: string): void {
 export function markFileSeenAndVisible(absPath: string): void {
 	const normalized = resolve(absPath);
 	seenFiles.add(normalized);
+	staleFilePaths.delete(normalized);
 	recordVisibilityReceipt(normalized);
 }
 
@@ -192,9 +226,57 @@ export function matchReadContent(
 	return {lineCount: entry.lineCount, size: entry.size};
 }
 
+function hashFileContent(content: string | Buffer): string {
+	return createHash('sha256').update(content).digest('hex');
+}
+
+/** Store the exact full-file version exposed to the model for stale-write checks. */
+export function rememberFileSnapshot(
+	absPath: string,
+	content: string | Buffer,
+): void {
+	getReadContentScope().fileSnapshots.set(resolve(absPath), {
+		digest: hashFileContent(content),
+	});
+}
+
+/** Whether a full-file snapshot exists in the current agent scope. */
+export function hasFileSnapshot(absPath: string): boolean {
+	return getReadContentScope().fileSnapshots.has(resolve(absPath));
+}
+
+/** Forget a stale snapshot so a changed or deleted file can be read anew. */
+/** Forget all read evidence for a path after a filesystem operation replaces it. */
+export function forgetFileState(absPath: string): void {
+	const path = resolve(absPath);
+	const readContentPrefix = `${path}\0`;
+	seenFiles.delete(path);
+	for (const scope of readContentScopes.values()) {
+		for (const key of scope.files.keys()) {
+			if (key.startsWith(readContentPrefix)) scope.files.delete(key);
+		}
+		scope.fileSnapshots.delete(path);
+		scope.visibilityReceipts.delete(path);
+	}
+}
+
+/**
+ * Compare current bytes with the exact full-file snapshot.
+ * Undefined means the current scope never received a complete file snapshot.
+ */
+export function matchesFileSnapshot(
+	absPath: string,
+	content: string | Buffer,
+): boolean | undefined {
+	const snapshot = getReadContentScope().fileSnapshots.get(resolve(absPath));
+	if (!snapshot) return undefined;
+	return snapshot.digest === hashFileContent(content);
+}
+
 /** Clear all tracked files. Called on /clear and exposed for tests. */
 export function clearReadTracker(): void {
 	seenFiles.clear();
+	staleFilePaths.clear();
 	readContentScopes.clear();
 }
 
@@ -218,10 +300,13 @@ export function recordVisibilityReceipt(
 	stats?: {mtimeMs: number; size: number},
 	startLine?: number,
 	endLine?: number,
+	content?: string | Buffer,
 ): void {
 	const scope = getReadContentScope();
 	const path = resolve(absPath);
 	const existing = scope.visibilityReceipts.get(path);
+	const contentDigest =
+		content === undefined ? undefined : hashFileContent(content);
 
 	// Fetch stats if not provided (for test helpers like markFileSeen)
 	if (!stats) {
@@ -240,6 +325,7 @@ export function recordVisibilityReceipt(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [], // Empty array signals full file visibility
 		});
 		return;
@@ -254,6 +340,7 @@ export function recordVisibilityReceipt(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [newRange],
 		});
 		return;
@@ -265,6 +352,7 @@ export function recordVisibilityReceipt(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [newRange],
 		});
 		return;
@@ -273,6 +361,41 @@ export function recordVisibilityReceipt(
 	// The whole file is already visible (empty list means full file), so a range
 	// read adds nothing. Pushing onto it would turn "full file" into one range.
 	if (existing.visibleRanges.length === 0) {
+		if (
+			contentDigest !== undefined &&
+			existing.contentDigest !== contentDigest
+		) {
+			scope.visibilityReceipts.set(path, {
+				mtimeMs: stats.mtimeMs,
+				size: stats.size,
+				generation: scope.generation,
+				contentDigest,
+				visibleRanges: [newRange],
+			});
+			return;
+		}
+		existing.mtimeMs = stats.mtimeMs;
+		existing.size = stats.size;
+		return;
+	}
+
+	// Same metadata can accompany different bytes (for example, an editor save
+	// followed by restoring the old mtime). Never combine ranges observed from
+	// different versions, or compare one agent's ranges to another agent's cache.
+	if (
+		(existing.contentDigest !== undefined &&
+			contentDigest !== undefined &&
+			existing.contentDigest !== contentDigest) ||
+		(existing.contentDigest === undefined && contentDigest !== undefined) ||
+		(existing.contentDigest !== undefined && contentDigest === undefined)
+	) {
+		scope.visibilityReceipts.set(path, {
+			mtimeMs: stats.mtimeMs,
+			size: stats.size,
+			generation: scope.generation,
+			contentDigest,
+			visibleRanges: [newRange],
+		});
 		return;
 	}
 
@@ -300,10 +423,13 @@ export function recordEditVisibility(
 	startLine: number,
 	oldLineCount: number,
 	newLineCount: number,
+	content?: string | Buffer,
 ): void {
 	const scope = getReadContentScope();
 	const path = resolve(absPath);
 	const existing = scope.visibilityReceipts.get(path);
+	const contentDigest =
+		content === undefined ? undefined : hashFileContent(content);
 	const editedRange: LineRange = {
 		start: startLine,
 		end: startLine + Math.max(newLineCount, 1) - 1,
@@ -315,6 +441,7 @@ export function recordEditVisibility(
 			mtimeMs: stats.mtimeMs,
 			size: stats.size,
 			generation: scope.generation,
+			contentDigest,
 			visibleRanges: [editedRange],
 		});
 		return;
@@ -325,6 +452,11 @@ export function recordEditVisibility(
 	if (existing.visibleRanges.length === 0) {
 		existing.mtimeMs = stats.mtimeMs;
 		existing.size = stats.size;
+		if (contentDigest === undefined) {
+			delete existing.contentDigest;
+		} else {
+			existing.contentDigest = contentDigest;
+		}
 		return;
 	}
 
@@ -352,7 +484,24 @@ export function recordEditVisibility(
 
 	existing.mtimeMs = stats.mtimeMs;
 	existing.size = stats.size;
+	if (contentDigest === undefined) {
+		delete existing.contentDigest;
+	} else {
+		existing.contentDigest = contentDigest;
+	}
 	existing.visibleRanges = next;
+}
+
+/** Compare raw current file bytes with the version underlying this scope's visible ranges. */
+export function matchesVisibilityContent(
+	absPath: string,
+	content: string | Buffer,
+): boolean | undefined {
+	const digest = getReadContentScope().visibilityReceipts.get(
+		resolve(absPath),
+	)?.contentDigest;
+	if (digest === undefined) return undefined;
+	return digest === hashFileContent(content);
 }
 
 /**
@@ -413,9 +562,13 @@ export function hasVisibleLines(
 			const visibleRangesStr = receipt.visibleRanges
 				.map(r => (r.start === r.end ? `${r.start}` : `${r.start}-${r.end}`))
 				.join(', ');
+			const endLine = targetLines.reduce(
+				(maximum, targetLine) => Math.max(maximum, targetLine),
+				line,
+			);
 			return {
 				visible: false,
-				error: `Line ${line} in "${absPath}" has not been read. You've only seen lines: ${visibleRangesStr}. Use read_file with start_line and end_line to read the target range first.`,
+				error: `Line ${line} in "${absPath}" has not been read. You've only seen lines: ${visibleRangesStr}. Use read_file with start_line: ${line} and end_line: ${endLine} to read the remaining target range first.`,
 			};
 		}
 	}

@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, utimes, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -1750,6 +1750,41 @@ test.serial('string_replace: a file changed outside after the read is refused', 
 		});
 		t.false(result.valid);
 		if (!result.valid) t.regex(result.error, /modified externally/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace refuses same-size external edits with restored mtime', async t => {
+	const filePath = await createTestFile('same-metadata.txt', 'alpha\nvalue\n');
+	const originalCwd = process.cwd();
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	try {
+		process.chdir(testDir);
+		await utimes(filePath, fixedTime, fixedTime);
+		await readFileTool.tool.execute!(
+			{path: 'same-metadata.txt'},
+			{toolCallId: 'test', messages: []},
+		);
+
+		await writeFile(filePath, 'omega\nvalue\n', 'utf-8');
+		await utimes(filePath, fixedTime, fixedTime);
+		const validation = await stringReplaceTool.validator!({
+			path: 'same-metadata.txt',
+			old_str: 'value',
+			new_str: 'VALUE',
+		});
+		t.true(validation.valid);
+
+		await t.throwsAsync(
+			executeStringReplace({
+				path: 'same-metadata.txt',
+				old_str: 'value',
+				new_str: 'VALUE',
+			}),
+			{message: /changed since it was read/i},
+		);
+		t.is(await readFile(filePath, 'utf-8'), 'omega\nvalue\n');
 	} finally {
 		process.chdir(originalCwd);
 	}

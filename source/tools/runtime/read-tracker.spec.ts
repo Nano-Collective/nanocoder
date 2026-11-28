@@ -3,6 +3,7 @@ import test from 'ava';
 import {
 	bumpReadContentGeneration,
 	clearReadTracker,
+	clearStaleFilePath,
 	forgetReadContent,
 	forgetVisibilityReceipt,
 	getLineNumbersForText,
@@ -10,7 +11,10 @@ import {
 	hasVisibleLines,
 	invalidateAllVisibilityReceipts,
 	markFileSeen,
+	markFilePathStale,
+	hasStaleFilePath,
 	matchReadContent,
+	matchesVisibilityContent,
 	recordEditVisibility,
 	recordVisibilityReceipt,
 	rememberReadContent,
@@ -29,6 +33,15 @@ test.serial('hasSeenFile is false for an unseen file', t => {
 test.serial('markFileSeen makes a file seen', t => {
 	markFileSeen('/tmp/read-me.txt');
 	t.true(hasSeenFile('/tmp/read-me.txt'));
+});
+
+test.serial('markFileSeen does not clear stale-path state without a fresh read', t => {
+	markFileSeen('/tmp/read-me.txt');
+	markFilePathStale('/tmp/read-me.txt');
+	markFileSeen('/tmp/read-me.txt');
+	t.true(hasStaleFilePath('/tmp/read-me.txt'));
+	clearStaleFilePath('/tmp/read-me.txt');
+	t.false(hasStaleFilePath('/tmp/read-me.txt'));
 });
 
 test.serial('paths are normalized so relative and absolute match', t => {
@@ -190,6 +203,27 @@ test.serial('recordVisibilityReceipt merges multiple ranges', t => {
 	t.false(check3.visible);
 });
 
+test.serial('visibility receipts bind ranges to the exact observed file content', t => {
+	const stats = {mtimeMs: 100, size: 30};
+	const firstVersion = 'first\nsecond\nthird\n';
+	recordVisibilityReceipt('/tmp/versioned.txt', stats, 1, 1, firstVersion);
+	recordVisibilityReceipt('/tmp/versioned.txt', stats, 2, 4, firstVersion);
+
+	t.true(hasVisibleLines('/tmp/versioned.txt', stats, [1, 2, 3, 4]).visible);
+	t.true(matchesVisibilityContent('/tmp/versioned.txt', firstVersion));
+	t.false(matchesVisibilityContent('/tmp/versioned.txt', 'other\nsecond\nthird\n'));
+});
+
+test.serial('ranges from different same-metadata file versions are not combined', t => {
+	const stats = {mtimeMs: 100, size: 30};
+	recordVisibilityReceipt('/tmp/mixed-versions.txt', stats, 1, 1, 'first\nsecond\n');
+	recordVisibilityReceipt('/tmp/mixed-versions.txt', stats, 2, 2, 'other\nsecond\n');
+
+	t.false(hasVisibleLines('/tmp/mixed-versions.txt', stats, [1, 2]).visible);
+	t.true(hasVisibleLines('/tmp/mixed-versions.txt', stats, [2]).visible);
+	t.true(matchesVisibilityContent('/tmp/mixed-versions.txt', 'other\nsecond\n'));
+});
+
 test.serial('recordVisibilityReceipt replaces receipt on file change', t => {
 	const oldStats = {mtimeMs: 100, size: 500};
 	const newStats = {mtimeMs: 200, size: 600};
@@ -304,6 +338,7 @@ test.serial('hasVisibleLines blocks edit when any target line is invisible', t =
 	const check = hasVisibleLines('/tmp/partial-vis.txt', stats, [5, 15]);
 	t.false(check.visible);
 	t.regex(check.error!, /Line 15.*has not been read/);
+	t.regex(check.error!, /start_line: 15 and end_line: 15/);
 });
 
 test.serial('visibility receipts survive generation bump (use invalidateAllVisibilityReceipts)', t => {

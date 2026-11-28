@@ -181,9 +181,11 @@ function userFileTempName(name: string): string {
 export async function atomicWriteUserFile(
 	filePath: string,
 	data: string,
+	beforeCommit?: (targetPath: string) => Promise<void>,
 ): Promise<void> {
 	const target = await resolveUserFileTarget(filePath);
 	if (target === undefined) {
+		await beforeCommit?.(filePath);
 		await writeFile(filePath, data, 'utf-8');
 		return;
 	}
@@ -193,11 +195,13 @@ export async function atomicWriteUserFile(
 		existing = await stat(target);
 	} catch (error) {
 		if (errorCode(error) !== 'ENOENT') {
+			await beforeCommit?.(target);
 			await writeFile(target, data, 'utf-8');
 			return;
 		}
 	}
 	if (existing && (!existing.isFile() || existing.nlink > 1)) {
+		await beforeCommit?.(target);
 		await writeFile(target, data, 'utf-8');
 		return;
 	}
@@ -224,6 +228,8 @@ export async function atomicWriteUserFile(
 		} finally {
 			await handle.close();
 		}
+		// Give callers a final chance to detect a stale target before replacing it.
+		await beforeCommit?.(target);
 		await renameImpl(tmpPath, target);
 	} catch (error) {
 		try {
@@ -231,6 +237,7 @@ export async function atomicWriteUserFile(
 		} catch {}
 		const code = errorCode(error);
 		if (code !== undefined && IN_PLACE_FALLBACK_CODES.has(code)) {
+			await beforeCommit?.(target);
 			await writeFile(target, data, 'utf-8');
 			return;
 		}

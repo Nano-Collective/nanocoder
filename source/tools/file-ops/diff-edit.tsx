@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, lstat} from 'node:fs/promises';
+import {access, lstat, realpath} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {Box, Text} from 'ink';
 import React from 'react';
@@ -22,11 +22,14 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {
 	forgetReadContent,
+	forgetVisibilityReceipt,
 	getLineNumbersForText,
 	hasSeenFile,
 	hasVisibleLines,
 	markFileSeen,
+	matchesFileSnapshot,
 	recordEditVisibility,
+	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
@@ -39,6 +42,7 @@ import {
 	isVSCodeConnected,
 	sendFileChangeToVSCode,
 } from '@/vscode/index';
+import {matchesCurrentFileContent} from './file-snapshot';
 
 interface DiffEditArgs {
 	path: string;
@@ -292,6 +296,8 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const hadMatchingSnapshot =
+		matchesFileSnapshot(absPath, fileContent) === true;
 
 	const newContent = validateBlocks(fileContent, blocks, path);
 
@@ -302,7 +308,35 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	);
 	const firewallWarning = enforceFirewall(firewallResult);
 
-	await atomicWriteUserFile(absPath, newContent);
+	const expectedTargetPath = await realpath(absPath);
+	const staleFileError = () =>
+		new Error(
+			`File "${path}" changed since it was read. Re-read it before editing.`,
+		);
+	if (
+		!(await matchesCurrentFileContent(absPath, fileContent, expectedTargetPath))
+	) {
+		invalidateCache(absPath);
+		forgetReadContent(absPath);
+		forgetVisibilityReceipt(absPath);
+		throw staleFileError();
+	}
+
+	await atomicWriteUserFile(absPath, newContent, async targetPath => {
+		if (
+			targetPath !== expectedTargetPath ||
+			!(await matchesCurrentFileContent(
+				absPath,
+				fileContent,
+				expectedTargetPath,
+			))
+		) {
+			invalidateCache(absPath);
+			forgetReadContent(absPath);
+			forgetVisibilityReceipt(absPath);
+			throw staleFileError();
+		}
+	});
 	invalidateCache(absPath);
 	markFileSeen(absPath);
 	forgetReadContent(absPath);
@@ -311,6 +345,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	// are applied in order, so positions follow the evolving content.
 	try {
 		const stats = await lstat(absPath);
+		if (hadMatchingSnapshot) rememberFileSnapshot(absPath, newContent);
 		let working = fileContent;
 		for (const block of blocks) {
 			const blockLines = getLineNumbersForText(working, block.search);
@@ -321,6 +356,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 				blockLines[0],
 				blockLines.length,
 				block.replace.replace(/\r\n/g, '\n').split('\n').length,
+				newContent,
 			);
 			working = replaceFirstLiteral(working, block.search, block.replace);
 		}

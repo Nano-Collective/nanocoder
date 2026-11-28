@@ -190,6 +190,27 @@ test.serial('atomicWriteUserFile replaces an existing file', async t => {
 	}
 });
 
+test.serial('atomicWriteUserFile runs its final guard before replacing the target', async t => {
+	const tempDir = await createTempDir();
+	try {
+		const filePath = path.join(tempDir, 'guarded.txt');
+		await fs.writeFile(filePath, 'original', 'utf-8');
+
+		await t.throwsAsync(
+			atomicWriteUserFile(filePath, 'replacement', async targetPath => {
+				t.is(targetPath, filePath);
+				throw new Error('stale target');
+			}),
+			{message: 'stale target'},
+		);
+
+		t.is(await fs.readFile(filePath, 'utf-8'), 'original');
+		t.deepEqual(await listTempFiles(tempDir), []);
+	} finally {
+		await cleanupTempDir(tempDir);
+	}
+});
+
 test.serial('atomicWriteUserFile keeps the original file mode', async t => {
 	if (process.platform === 'win32') {
 		t.pass('skipped: POSIX file modes are not meaningful on Windows');

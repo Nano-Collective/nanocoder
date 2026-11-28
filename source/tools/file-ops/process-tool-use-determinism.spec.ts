@@ -34,7 +34,10 @@ import {
 } from '@/message-handler';
 import {clearPendingHookContext} from '@/services/lifecycle-hooks';
 import {setProjectRoot, setSessionCwd} from '@/services/session-cwd';
-import {markFileSeenAndVisible} from '@/tools/runtime/read-tracker';
+import {
+	markFileSeenAndVisible,
+	rememberFileSnapshot,
+} from '@/tools/runtime/read-tracker';
 
 console.log(`\nfile-ops processToolUse determinism spec`);
 
@@ -126,6 +129,7 @@ test.serial(
 		// Validator requires a read-before-edit: simulate the model having
 		// read the file. Both invocations start from the same read state.
 		markFileSeenAndVisible(absPath);
+		rememberFileSnapshot(absPath, initial);
 
 		const args = {
 			path: relPath,
@@ -141,6 +145,7 @@ test.serial(
 		writeFileSync(absPath, initial, 'utf-8');
 		// The reset is an outside change to the file, so the model reads it again.
 		markFileSeenAndVisible(absPath);
+		rememberFileSnapshot(absPath, initial);
 		const resultB = await invoke({name: 'string_replace', args});
 		const bytesB = readFileSync(absPath);
 
@@ -159,6 +164,7 @@ test.serial(
 		const initial = 'line one\nline two\nline three\n';
 		writeFileSync(absPath, initial, 'utf-8');
 		markFileSeenAndVisible(absPath);
+		rememberFileSnapshot(absPath, initial);
 
 		const diff =
 			'<<<<<<< SEARCH\nline two\n=======\nLINE-TWO\n>>>>>>> REPLACE';
@@ -170,6 +176,7 @@ test.serial(
 		writeFileSync(absPath, initial, 'utf-8');
 		// The reset is an outside change to the file, so the model reads it again.
 		markFileSeenAndVisible(absPath);
+		rememberFileSnapshot(absPath, initial);
 		const resultB = await invoke({name: 'diff_edit', args});
 		const bytesB = readFileSync(absPath);
 
@@ -192,6 +199,7 @@ test.serial(
 		const initial = 'X\n';
 		writeFileSync(absPath, initial, 'utf-8');
 		markFileSeenAndVisible(absPath);
+		rememberFileSnapshot(absPath, initial);
 
 		const args = {
 			path: relPath,
@@ -204,6 +212,7 @@ test.serial(
 		writeFileSync(absPath, initial, 'utf-8');
 		// The reset is an outside change to the file, so the model reads it again.
 		markFileSeenAndVisible(absPath);
+		rememberFileSnapshot(absPath, initial);
 		const resultB = await invoke({name: 'string_replace', args});
 		const bytesB = readFileSync(absPath);
 

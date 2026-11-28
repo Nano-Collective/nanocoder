@@ -19,10 +19,12 @@ import {
 } from '@/input/clipboard-image';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {
+	clearStaleFilePath,
 	markFileSeen,
 	matchReadContent,
 	READ_STUB_MARKER,
 	recordVisibilityReceipt,
+	rememberFileSnapshot,
 	rememberReadContent,
 } from '@/tools/runtime/read-tracker';
 import type {NanocoderToolExport, VisualToolOutput} from '@/types/core';
@@ -148,8 +150,12 @@ const executeReadFile = async (args: {
 		if (content.length === 0) {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
+			clearStaleFilePath(absPath);
+			if (!cached.derived && !cached.notUtf8) {
+				rememberFileSnapshot(absPath, content);
+			}
 			rememberReadContent(absPath, stats, 0, args.start_line, args.end_line);
-			recordVisibilityReceipt(absPath, stats, undefined, undefined);
+			recordVisibilityReceipt(absPath, stats, undefined, undefined, content);
 			return EMPTY_CONTENT_MARKER;
 		}
 
@@ -171,6 +177,7 @@ const executeReadFile = async (args: {
 			// Marking it seen keeps the read-before-edit guard aligned with the
 			// content that was actually returned, just like a ranged read.
 			markFileSeen(absPath);
+			clearStaleFilePath(absPath);
 			rememberReadContent(
 				absPath,
 				stats,
@@ -179,9 +186,9 @@ const executeReadFile = async (args: {
 				args.end_line,
 			);
 			// Record visibility receipt for the preview lines shown
-			recordVisibilityReceipt(absPath, stats, 1, previewEndLine);
+			recordVisibilityReceipt(absPath, stats, 1, previewEndLine, content);
 
-			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line to continue.]`;
+			return `${preview}\n\n[Truncated at line ${previewEndLine} of ${totalLines}. Use read_file with start_line: ${previewEndLine + 1} and end_line: ${totalLines} to continue.]`;
 		}
 
 		// Line ranges specified - read and return content
@@ -196,6 +203,7 @@ const executeReadFile = async (args: {
 		// Content (full file or an explicit range) has been returned to the model,
 		// so it has now "seen" this file for read-before-edit purposes.
 		markFileSeen(absPath);
+		clearStaleFilePath(absPath);
 		rememberReadContent(
 			absPath,
 			stats,
@@ -204,7 +212,18 @@ const executeReadFile = async (args: {
 			args.end_line,
 		);
 		// Record visibility receipt for the actual lines returned
-		recordVisibilityReceipt(absPath, stats, startLine, endLine);
+		recordVisibilityReceipt(absPath, stats, startLine, endLine, content);
+		// Only a complete, editable text body proves the exact version needed by
+		// write_file. A preview or range read may still authorize bounded edits,
+		// but it cannot safely authorize a whole-file replacement.
+		if (
+			startLine === 1 &&
+			endLine === totalLines &&
+			!cached.derived &&
+			!cached.notUtf8
+		) {
+			rememberFileSnapshot(absPath, content);
+		}
 
 		// Return content without line numbers for clean content-based editing
 		return linesToReturn.join('\n');
