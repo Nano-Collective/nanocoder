@@ -8,7 +8,7 @@ import {
 } from '@/firewall/mutation-firewall';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {validatePath, validatePathPair} from '@/tools/file-ops/path-validators';
-import {forgetFileState} from '@/tools/runtime/read-tracker';
+import {forgetFileState, markFilePathStale} from '@/tools/runtime/read-tracker';
 import {createFileToolApproval} from '@/tools/runtime/tool-approval';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
@@ -47,6 +47,7 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 			evaluatePathMutation('delete', {source: args.path as string}),
 		);
 		await rm(absPath);
+		markFilePathStale(absPath);
 		invalidateCache(absPath);
 		return `File deleted: ${args.path}${firewallWarning}`;
 	}
@@ -63,6 +64,7 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 
 	if (operation === 'move') {
 		await rename(srcAbsPath, destAbsPath);
+		markFilePathStale(srcAbsPath);
 		forgetFileState(destAbsPath);
 		invalidateCache(srcAbsPath);
 		invalidateCache(destAbsPath);

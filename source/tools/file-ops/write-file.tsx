@@ -28,11 +28,13 @@ import {
 } from '@/tools/file-ops/path-validators';
 import {getLanguageFromExtension} from '@/tools/file-ops/programming-language-helper';
 import {
+	clearStaleFilePath,
 	forgetFileState,
 	forgetReadContent,
 	forgetVisibilityReceipt,
 	hasFileSnapshot,
 	hasSeenFile,
+	hasStaleFilePath,
 	hasVisibleLines,
 	markFileSeen,
 	matchesFileSnapshot,
@@ -165,6 +167,10 @@ const executeWriteFile = async (args: {
 	}
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
+	if (hasStaleFilePath(absPath)) {
+		clearStaleFilePath(absPath);
+		throw new Error(staleReadError(args.path, absPath));
+	}
 	const fileExists = existsSync(absPath);
 	if (!fileExists && hasSeenFile(absPath)) {
 		invalidateStaleReadState(absPath);
@@ -623,7 +629,11 @@ const writeFileValidator = async (args: {
 	if (!formatResult.valid) return formatResult;
 
 	const absPath = resolve(getSafeSessionCwd(), args.path);
-	if (!existsSync(absPath) && hasSeenFile(absPath)) {
+	// The approval preview and execution wrapper both run this validator. Keep
+	// stale-path state intact here; executeWriteFile consumes it authoritatively.
+	const stalePath = hasStaleFilePath(absPath);
+	const fileExists = existsSync(absPath);
+	if (!stalePath && !fileExists && hasSeenFile(absPath)) {
 		invalidateStaleReadState(absPath);
 		return {valid: false, error: staleReadError(args.path, absPath)};
 	}
@@ -661,7 +671,7 @@ const writeFileValidator = async (args: {
 	// file the model has already read (or previously written) is allowed. This
 	// preserves the legitimate read-then-rewrite path while blocking blind
 	// overwrites that would destroy contents the model never looked at.
-	if (existsSync(absPath) && !hasSeenFile(absPath)) {
+	if (fileExists && !hasSeenFile(absPath) && !stalePath) {
 		return {
 			valid: false,
 			error: `"${args.path}" already exists and you have not read it this session. Call read_file on it first — if the file is over 300 lines, specify start_line and end_line to read its actual content, not just metadata — so you don't discard existing content, then retry. For small changes, prefer string_replace over a full overwrite.`,
@@ -671,7 +681,7 @@ const writeFileValidator = async (args: {
 	// Line-level visibility check for overwrites: if the file exists and has been
 	// seen at the file level, ensure the agent has actually read the content
 	// being overwritten. This prevents partial reads followed by blind overwrites.
-	if (existsSync(absPath) && hasSeenFile(absPath)) {
+	if (fileExists && hasSeenFile(absPath)) {
 		try {
 			const stats = await lstat(absPath);
 			const cached = await getCachedFileContent(absPath);

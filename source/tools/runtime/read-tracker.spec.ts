@@ -3,6 +3,7 @@ import test from 'ava';
 import {
 	bumpReadContentGeneration,
 	clearReadTracker,
+	clearStaleFilePath,
 	forgetReadContent,
 	forgetVisibilityReceipt,
 	getLineNumbersForText,
@@ -10,6 +11,8 @@ import {
 	hasVisibleLines,
 	invalidateAllVisibilityReceipts,
 	markFileSeen,
+	markFilePathStale,
+	hasStaleFilePath,
 	matchReadContent,
 	matchesVisibilityContent,
 	recordEditVisibility,
@@ -30,6 +33,15 @@ test.serial('hasSeenFile is false for an unseen file', t => {
 test.serial('markFileSeen makes a file seen', t => {
 	markFileSeen('/tmp/read-me.txt');
 	t.true(hasSeenFile('/tmp/read-me.txt'));
+});
+
+test.serial('markFileSeen does not clear stale-path state without a fresh read', t => {
+	markFileSeen('/tmp/read-me.txt');
+	markFilePathStale('/tmp/read-me.txt');
+	markFileSeen('/tmp/read-me.txt');
+	t.true(hasStaleFilePath('/tmp/read-me.txt'));
+	clearStaleFilePath('/tmp/read-me.txt');
+	t.false(hasStaleFilePath('/tmp/read-me.txt'));
 });
 
 test.serial('paths are normalized so relative and absolute match', t => {

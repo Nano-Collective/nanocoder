@@ -25,6 +25,7 @@ import {resolve} from 'node:path';
  * remains the backstop for stale reads.
  */
 const seenFiles = new Set<string>();
+const staleFilePaths = new Set<string>();
 
 type ReadContentEntry = {
 	mtimeMs: number;
@@ -91,7 +92,26 @@ function readContentKey(
 
 /** Record that a file's contents have been seen this session (read or written). */
 export function markFileSeen(absPath: string): void {
-	seenFiles.add(resolve(absPath));
+	const path = resolve(absPath);
+	seenFiles.add(path);
+}
+
+/** Require a fresh read after a file operation removes or relocates a path. */
+export function markFilePathStale(absPath: string): void {
+	const path = resolve(absPath);
+	const wasSeen = seenFiles.has(path);
+	forgetFileState(path);
+	if (wasSeen) staleFilePaths.add(path);
+}
+
+/** Whether a file operation invalidated this path until the next explicit read. */
+export function hasStaleFilePath(absPath: string): boolean {
+	return staleFilePaths.has(resolve(absPath));
+}
+
+/** Clear the one-time stale-path warning after it has been returned to the model. */
+export function clearStaleFilePath(absPath: string): void {
+	staleFilePaths.delete(resolve(absPath));
 }
 
 /**
@@ -101,6 +121,7 @@ export function markFileSeen(absPath: string): void {
 export function markFileSeenAndVisible(absPath: string): void {
 	const normalized = resolve(absPath);
 	seenFiles.add(normalized);
+	staleFilePaths.delete(normalized);
 	recordVisibilityReceipt(normalized);
 }
 
@@ -255,6 +276,7 @@ export function matchesFileSnapshot(
 /** Clear all tracked files. Called on /clear and exposed for tests. */
 export function clearReadTracker(): void {
 	seenFiles.clear();
+	staleFilePaths.clear();
 	readContentScopes.clear();
 }
 

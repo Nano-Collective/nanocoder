@@ -19,6 +19,7 @@ import {
 } from '@/input/clipboard-image';
 import {getProjectRoot, getSafeSessionCwd} from '@/services/session-cwd';
 import {
+	clearStaleFilePath,
 	markFileSeen,
 	matchReadContent,
 	READ_STUB_MARKER,
@@ -149,6 +150,7 @@ const executeReadFile = async (args: {
 		if (content.length === 0) {
 			// An empty file has been seen in full; allow edits/overwrites against it.
 			markFileSeen(absPath);
+			clearStaleFilePath(absPath);
 			if (!cached.derived && !cached.notUtf8) {
 				rememberFileSnapshot(absPath, content);
 			}
@@ -175,6 +177,7 @@ const executeReadFile = async (args: {
 			// Marking it seen keeps the read-before-edit guard aligned with the
 			// content that was actually returned, just like a ranged read.
 			markFileSeen(absPath);
+			clearStaleFilePath(absPath);
 			rememberReadContent(
 				absPath,
 				stats,
@@ -200,6 +203,7 @@ const executeReadFile = async (args: {
 		// Content (full file or an explicit range) has been returned to the model,
 		// so it has now "seen" this file for read-before-edit purposes.
 		markFileSeen(absPath);
+		clearStaleFilePath(absPath);
 		rememberReadContent(
 			absPath,
 			stats,

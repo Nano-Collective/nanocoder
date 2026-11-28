@@ -1,5 +1,5 @@
 import {existsSync} from 'node:fs';
-import {mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rename, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'ava';
@@ -22,7 +22,12 @@ import {withValidation} from '../runtime/tool-validation.js';
 import {fileOpTool} from './file-op.js';
 import {readFileTool} from '../read-file.js';
 import {writeFileTool} from './write-file.js';
-import {clearReadTracker, hasFileSnapshot, hasSeenFile} from '../runtime/read-tracker.js';
+import {
+	clearReadTracker,
+	hasFileSnapshot,
+	hasSeenFile,
+	hasStaleFilePath,
+} from '../runtime/read-tracker.js';
 
 function TestThemeProvider({children}: {children: React.ReactNode}) {
 	const themeContextValue = {
@@ -227,8 +232,15 @@ test.serial('file_op delete makes write_file reject recreation once before allow
 
 	await runFileOp({operation: 'delete', path: 'greet.py'});
 
-	t.true(hasSeenFile(absPath));
-	t.true(hasFileSnapshot(absPath));
+	t.false(hasSeenFile(absPath));
+	t.false(hasFileSnapshot(absPath));
+	t.true(hasStaleFilePath(absPath));
+	const preview = await writeFileTool.validator!({
+		path: 'greet.py',
+		content: 'new\n',
+	});
+	t.true(preview.valid);
+	t.true(hasStaleFilePath(absPath), 'preview validation must not consume the marker');
 	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
 		message: /no longer available at this path/,
 	});
@@ -241,6 +253,83 @@ test.serial('file_op delete makes write_file reject recreation once before allow
 	t.true(overwrite.valid);
 });
 
+test.serial('file_op delete rejects an identical replacement at the same path until it is reread', async t => {
+	const absPath = join(workspace, 'greet.py');
+	const replacementPath = join(workspace, 'replacement.py');
+	setProjectRoot(workspace);
+	const originalContent = await readFile(absPath, 'utf-8');
+	await writeFile(replacementPath, originalContent);
+	await runReadFile('greet.py');
+
+	await runFileOp({operation: 'delete', path: 'greet.py'});
+	await rename(replacementPath, absPath);
+	t.is(await readFile(absPath, 'utf-8'), originalContent);
+
+	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
+		message: /changed since it was read/,
+	});
+	t.true(hasStaleFilePath(absPath), 'validation keeps the marker until read_file runs');
+	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
+		message: /changed since it was read/,
+	});
+	t.is(await readFile(absPath, 'utf-8'), originalContent);
+
+	await runReadFile('greet.py');
+	await runValidatedWrite({path: 'greet.py', content: 'new\n'});
+	t.is(await readFile(absPath, 'utf-8'), 'new\n');
+});
+
+test.serial('file_op move rejects an identical source replacement until it is reread', async t => {
+	const sourcePath = join(workspace, 'greet.py');
+	const replacementPath = join(workspace, 'replacement.py');
+	setProjectRoot(workspace);
+	const originalContent = await readFile(sourcePath, 'utf-8');
+	await writeFile(replacementPath, originalContent);
+	await runReadFile('greet.py');
+
+	await runFileOp({operation: 'move', path: 'greet.py', destination: 'moved.py'});
+	await rename(replacementPath, sourcePath);
+	t.is(await readFile(sourcePath, 'utf-8'), originalContent);
+
+	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
+		message: /changed since it was read/,
+	});
+	t.true(hasStaleFilePath(sourcePath), 'validation keeps the marker until read_file runs');
+	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
+		message: /changed since it was read/,
+	});
+	t.is(await readFile(sourcePath, 'utf-8'), originalContent);
+
+	await runReadFile('greet.py');
+	await runValidatedWrite({path: 'greet.py', content: 'new\n'});
+	t.is(await readFile(sourcePath, 'utf-8'), 'new\n');
+});
+
+test.serial('file_op delete of an unread file does not block creating it later', async t => {
+	const absPath = join(workspace, 'unread.py');
+	setProjectRoot(workspace);
+	await writeFile(absPath, 'existing but unread\n');
+
+	await runFileOp({operation: 'delete', path: 'unread.py'});
+	t.false(hasStaleFilePath(absPath));
+	await runValidatedWrite({path: 'unread.py', content: 'deliberate new file\n'});
+	t.is(await readFile(absPath, 'utf-8'), 'deliberate new file\n');
+});
+
+test.serial('read_file clears stale-path state for an intentional replacement', async t => {
+	const absPath = join(workspace, 'greet.py');
+	setProjectRoot(workspace);
+	await runReadFile('greet.py');
+	await runFileOp({operation: 'delete', path: 'greet.py'});
+	await writeFile(absPath, 'replacement\n');
+	t.true(hasStaleFilePath(absPath));
+
+	await runReadFile('greet.py');
+	t.false(hasStaleFilePath(absPath));
+	await runValidatedWrite({path: 'greet.py', content: 'intended edit\n'});
+	t.is(await readFile(absPath, 'utf-8'), 'intended edit\n');
+});
+
 test.serial('file_op move makes write_file reject source recreation once before allowing a retry', async t => {
 	const source = join(workspace, 'greet.py');
 	const destination = join(workspace, 'moved.py');
@@ -251,8 +340,9 @@ test.serial('file_op move makes write_file reject source recreation once before 
 
 	await runFileOp({operation: 'move', path: 'greet.py', destination: 'moved.py'});
 
-	t.true(hasSeenFile(source));
-	t.true(hasFileSnapshot(source));
+	t.false(hasSeenFile(source));
+	t.false(hasFileSnapshot(source));
+	t.true(hasStaleFilePath(source));
 	t.false(hasSeenFile(destination));
 	t.false(hasFileSnapshot(destination));
 	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
