@@ -304,6 +304,13 @@ test('command passes on exit 0 and fails otherwise', async t => {
 // runOnce, driven by a stub CLI instead of a model
 // ============================================================================
 
+function restoreEnv(previous: Record<string, string | undefined>): void {
+	for (const [key, value] of Object.entries(previous)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
+}
+
 /** Write a stand-in for `dist/cli.js` that behaves however the test needs. */
 async function stubCli(body: string): Promise<string> {
 	const cliPath = path.join(tempRoot, 'stub-cli.js');
@@ -354,6 +361,221 @@ test('runOnce passes and records the reported steps and tokens', async t => {
 	t.is(run.totalTokens, 1000);
 	t.is(run.costUsd, null, 'no pricing lookup means no cost, not zero cost');
 	t.true(run.durationMs >= 0);
+});
+
+test.serial('runOnce isolates user config and data, carrying over only providers', async t => {
+	const sourceConfigDir = path.join(tempRoot, 'user-config');
+	await fs.mkdir(sourceConfigDir, {recursive: true});
+	const sourceDataDir = path.join(tempRoot, 'user-data');
+	const userMemoryPath = path.join(sourceDataDir, 'memory', 'private.json');
+	await fs.mkdir(path.dirname(userMemoryPath), {recursive: true});
+	const userMemoryContents = '{"memory":"keep this private"}';
+	await fs.writeFile(userMemoryPath, userMemoryContents);
+	const providers = [
+		{
+			name: 'Ollama',
+			models: ['qwen2.5:1.5b'],
+			baseUrl: 'http://localhost:11434/v1',
+			apiKey: '${OLLAMA_API_KEY}',
+		},
+		{
+			name: 'PrivateProvider',
+			models: ['private-model'],
+			apiKey: 'private-key',
+		},
+	];
+	const environmentProviders = [
+		{
+			name: 'Ollama',
+			models: ['env-model'],
+			baseUrl: 'http://localhost:11435/v1',
+			apiKey: '${OLLAMA_ENV_API_KEY}',
+		},
+		{name: 'EnvironmentProvider', models: ['private-env-model']},
+	];
+	const fileEnvironmentProviders = [
+		{
+			name: 'Ollama',
+			models: ['file-env-model'],
+			baseUrl: 'http://localhost:11436/v1',
+			apiKey: '${OLLAMA_FILE_API_KEY}',
+		},
+		{name: 'PrivateFileProvider', models: ['private-file-model']},
+	];
+	const userConfig = {
+		nanocoder: {
+			providers,
+			hooks: {'session-start': [{command: 'touch private-hook-marker'}]},
+			systemPrompt: {content: 'private user prompt'},
+			formatters: [{command: 'private formatter', match: ['**/*']}],
+			mcpServers: [{name: 'private-server', command: 'private-mcp'}],
+		},
+	};
+	const userConfigContents = JSON.stringify(userConfig, null, 2);
+	const agentsConfigPath = path.join(sourceConfigDir, 'agents.config.json');
+	const preferencesPath = path.join(
+		sourceConfigDir,
+		'nanocoder-preferences.json',
+	);
+	const providersFilePath = path.join(sourceConfigDir, 'private-providers.json');
+	const preferencesContents = JSON.stringify({
+		lastProvider: 'PrivateProvider',
+		lastModel: 'private-model',
+	});
+	await fs.writeFile(
+		agentsConfigPath,
+		userConfigContents,
+	);
+	await fs.writeFile(preferencesPath, preferencesContents);
+	await fs.writeFile(
+		providersFilePath,
+		JSON.stringify(fileEnvironmentProviders),
+	);
+
+	const capturePath = path.join(tempRoot, 'captured-run-config.json');
+	const fileCapturePath = path.join(
+		tempRoot,
+		'captured-run-config-from-file.json',
+	);
+	const unmatchedCapturePath = path.join(
+		tempRoot,
+		'captured-run-config-unmatched-provider.json',
+	);
+	const previousEnvironment: Record<string, string | undefined> = {
+		NANOCODER_CONFIG_DIR: process.env.NANOCODER_CONFIG_DIR,
+		NANOCODER_DATA_DIR: process.env.NANOCODER_DATA_DIR,
+		NANOCODER_PROVIDERS: process.env.NANOCODER_PROVIDERS,
+		NANOCODER_PROVIDERS_FILE: process.env.NANOCODER_PROVIDERS_FILE,
+		NANOCODER_MCPSERVERS: process.env.NANOCODER_MCPSERVERS,
+		NANOCODER_MCPSERVERS_FILE: process.env.NANOCODER_MCPSERVERS_FILE,
+		AGENT_EVAL_CAPTURE_PATH: process.env.AGENT_EVAL_CAPTURE_PATH,
+	};
+	try {
+		process.env.NANOCODER_CONFIG_DIR = sourceConfigDir;
+		process.env.NANOCODER_DATA_DIR = sourceDataDir;
+		process.env.NANOCODER_PROVIDERS = JSON.stringify(environmentProviders);
+		process.env.NANOCODER_PROVIDERS_FILE = providersFilePath;
+		process.env.NANOCODER_MCPSERVERS = '[{"name":"private-env-server"}]';
+		process.env.NANOCODER_MCPSERVERS_FILE = path.join(
+			sourceConfigDir,
+			'private-mcp.json',
+		);
+		process.env.AGENT_EVAL_CAPTURE_PATH = capturePath;
+
+		const cliPath = await stubCli(`
+			import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+			import {join} from 'node:path';
+			const configDir = process.env.NANOCODER_CONFIG_DIR;
+			const dataDir = process.env.NANOCODER_DATA_DIR;
+			const configPath = join(configDir, 'agents.config.json');
+			const preferencesPath = join(configDir, 'nanocoder-preferences.json');
+			mkdirSync(join(dataDir, 'sessions'), {recursive: true});
+			writeFileSync(join(dataDir, 'sessions', 'benchmark.json'), 'temporary session');
+			const capture = {
+				configDir,
+				dataDir,
+				config: JSON.parse(readFileSync(configPath, 'utf8')),
+				preferencesExisted: existsSync(preferencesPath),
+				providersEnv: process.env.NANOCODER_PROVIDERS ?? null,
+				providersFile: process.env.NANOCODER_PROVIDERS_FILE ?? null,
+				mcpServers: process.env.NANOCODER_MCPSERVERS ?? null,
+				mcpServersFile: process.env.NANOCODER_MCPSERVERS_FILE ?? null,
+			};
+			writeFileSync(process.env.AGENT_EVAL_CAPTURE_PATH, JSON.stringify(capture));
+			writeFileSync(preferencesPath, JSON.stringify({lastProvider: 'Ollama', lastModel: 'changed'}));
+			process.stdout.write(JSON.stringify({kind: 'success', exitCode: 0, finalText: 'done', steps: 1}));
+		`);
+		await fs.writeFile(agentsConfigPath, '{ malformed json');
+		const malformedConfigRun = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'ollama',
+			workspaceRoot: tempRoot,
+		});
+		t.false(malformedConfigRun.pass);
+		t.regex(malformedConfigRun.failure ?? '', /agents\.config\.json/);
+		await t.throwsAsync(() => fs.stat(capturePath), {code: 'ENOENT'});
+		await fs.writeFile(agentsConfigPath, userConfigContents);
+
+		const run = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'ollama',
+			workspaceRoot: tempRoot,
+		});
+
+		t.true(run.pass);
+		const captured = JSON.parse(await fs.readFile(capturePath, 'utf8')) as {
+			configDir: string;
+			dataDir: string;
+			config: unknown;
+			preferencesExisted: boolean;
+			providersEnv: string | null;
+			providersFile: string | null;
+			mcpServers: string | null;
+			mcpServersFile: string | null;
+		};
+		t.not(captured.configDir, sourceConfigDir);
+		t.not(captured.dataDir, sourceDataDir);
+		t.deepEqual(captured.config, {
+			nanocoder: {providers: [environmentProviders[0]]},
+		});
+		t.false(captured.preferencesExisted);
+		t.is(captured.providersEnv, null);
+		t.is(captured.providersFile, null);
+		t.is(captured.mcpServers, null);
+		t.is(captured.mcpServersFile, null);
+		t.is(
+			await fs.readFile(path.join(sourceConfigDir, 'agents.config.json'), 'utf8'),
+			userConfigContents,
+		);
+		t.is(await fs.readFile(preferencesPath, 'utf8'), preferencesContents);
+		await t.throwsAsync(() => fs.stat(captured.configDir), {code: 'ENOENT'});
+		await t.throwsAsync(() => fs.stat(captured.dataDir), {code: 'ENOENT'});
+		t.is(await fs.readFile(userMemoryPath, 'utf8'), userMemoryContents);
+
+		delete process.env.NANOCODER_PROVIDERS;
+		process.env.AGENT_EVAL_CAPTURE_PATH = fileCapturePath;
+		const fileRun = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'ollama',
+			workspaceRoot: tempRoot,
+		});
+		t.true(fileRun.pass);
+		const capturedFromFile = JSON.parse(
+			await fs.readFile(fileCapturePath, 'utf8'),
+		) as typeof captured;
+		t.not(capturedFromFile.dataDir, sourceDataDir);
+		t.deepEqual(capturedFromFile.config, {
+			nanocoder: {providers: [fileEnvironmentProviders[0]]},
+		});
+		t.is(capturedFromFile.providersEnv, null);
+		t.is(capturedFromFile.providersFile, null);
+		t.is(capturedFromFile.mcpServers, null);
+		t.is(capturedFromFile.mcpServersFile, null);
+		await t.throwsAsync(() => fs.stat(capturedFromFile.configDir), {
+			code: 'ENOENT',
+		});
+		await t.throwsAsync(() => fs.stat(capturedFromFile.dataDir), {
+			code: 'ENOENT',
+		});
+
+		process.env.AGENT_EVAL_CAPTURE_PATH = unmatchedCapturePath;
+		const missingProviderRun = await runOnce({
+			cliPath,
+			fixture: await fixture([{kind: 'files-unchanged'}]),
+			provider: 'missing-provider',
+			workspaceRoot: tempRoot,
+		});
+		t.false(missingProviderRun.pass);
+		t.regex(missingProviderRun.failure ?? '', /Requested provider "missing-provider"/);
+		await t.throwsAsync(() => fs.stat(unmatchedCapturePath), {
+			code: 'ENOENT',
+		});
+	} finally {
+		restoreEnv(previousEnvironment);
+	}
 });
 
 test('runOnce fails the run when an assertion does not hold', async t => {
