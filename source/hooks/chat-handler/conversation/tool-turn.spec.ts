@@ -9,6 +9,7 @@ import {resetSessionCwd, setProjectRoot, setSessionCwd} from '@/services/session
 import {stringReplaceTool} from '@/tools/file-ops/string-replace';
 import {readFileTool} from '@/tools/read-file';
 import {clearReadTracker} from '@/tools/runtime/read-tracker';
+import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import {setGlobalToolConfirmHandler} from '@/tools/runtime/tool-confirm-queue';
 import type {ToolCall, ToolHandler, ToolManager, ToolResult} from '@/types/core';
 import {runToolTurn, type ToolTurnContext} from './tool-turn';
@@ -59,6 +60,8 @@ function harness(
 		approve?: boolean;
 		handlers?: Record<string, ToolHandler>;
 		manager: ToolManager;
+		signal?: AbortSignal;
+		onGenerating?: (generating: boolean) => void;
 	},
 ): Harness {
 	const prompts: string[] = [];
@@ -88,12 +91,14 @@ function harness(
 
 	const context: ToolTurnContext = {
 		toolManager: options.manager,
-		signal: new AbortController().signal,
+		signal: options.signal ?? new AbortController().signal,
 		addToChatQueue: node => {
 			const text = noticeText(node);
 			if (text) notices.push(text);
 		},
-		setIsGenerating: () => {},
+		setIsGenerating: generating => {
+			options.onGenerating?.(generating);
+		},
 		conversationStateManager: {
 			current: {updateAfterToolExecution: () => {}},
 		} as ToolTurnContext['conversationStateManager'],
@@ -273,4 +278,109 @@ test('a valid call still prompts and declining reports cancellation', async t =>
 	t.is(outcome.payload, 'declined');
 	const result = resultFor(outcome.results, 'ok-1');
 	t.true(result.content.toLowerCase().includes('cancelled'));
+});
+
+function deferred<T>(): {
+	promise: Promise<T>;
+	resolve: (value: T) => void;
+} {
+	let resolve: (value: T) => void = () => {};
+	const promise = new Promise<T>(settle => {
+		resolve = settle;
+	});
+	return {promise, resolve};
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+	const deadline = Date.now() + 1000;
+	while (!predicate()) {
+		if (Date.now() > deadline) {
+			throw new Error('timed out waiting for the validator to start');
+		}
+		await new Promise(resolve => setTimeout(resolve, 5));
+	}
+}
+
+test('abort during a slow validator cancels this call and the rest without prompting', async t => {
+	const gate = deferred<{valid: true}>();
+	t.teardown(() => gate.resolve({valid: true}));
+	let validatorCalls = 0;
+	const manager = {
+		getToolEntry: () => ({tool: SCHEMA_TOOL, approval: true}),
+		getToolValidator: () => async () => {
+			validatorCalls += 1;
+			return gate.promise;
+		},
+		getToolFormatter: () => undefined,
+		isReadOnly: () => false,
+	} as unknown as ToolManager;
+	const controller = new AbortController();
+	// The conversation loop sets this true before the tool turn. Idle is a
+	// later setIsGenerating(false), which must not happen while the check runs.
+	let generating = true;
+	let sawIdle = false;
+	const calls = [
+		call('slow-1', 'slow_tool', {path: 'a.txt'}),
+		call('next-1', 'next_tool', {path: 'b.txt'}),
+	];
+	const run = harness(t, {
+		approve: true,
+		manager,
+		signal: controller.signal,
+		onGenerating: value => {
+			generating = value;
+			if (!value) sawIdle = true;
+		},
+		handlers: {
+			slow_tool: async () => 'ran',
+			next_tool: async () => 'ran',
+		},
+	});
+
+	const pending = run.run(calls);
+	await waitUntil(() => validatorCalls === 1);
+	await new Promise(resolve => setImmediate(resolve));
+
+	t.true(generating, 'generation stays busy while the validator is pending');
+	t.false(sawIdle, 'the turn must not go idle before the dialog');
+	t.deepEqual(run.prompts, [], 'the dialog is not shown yet');
+	t.is(validatorCalls, 1, 'the later call is not checked yet');
+
+	controller.abort();
+	let timer: NodeJS.Timeout | undefined;
+	let outcome: Awaited<typeof pending>;
+	try {
+		outcome = await Promise.race([
+			pending,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() =>
+						reject(
+							new Error(
+								'runToolTurn waited on the validator after abort',
+							),
+						),
+					250,
+				);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+
+	t.is(outcome.kind, 'stop');
+	if (outcome.kind !== 'stop') return;
+	t.is(outcome.payload, 'declined');
+	t.deepEqual(run.prompts, [], 'abort must not open the confirmation');
+	t.deepEqual(run.handlerCalls, [], 'neither handler runs');
+	t.deepEqual(outcome.results, createCancellationResults(calls));
+	const resultsSnapshot = outcome.results?.map(result => ({...result}));
+
+	gate.resolve({valid: true});
+	await new Promise(resolve => setTimeout(resolve, 30));
+
+	t.deepEqual(run.prompts, []);
+	t.deepEqual(run.handlerCalls, []);
+	t.is(validatorCalls, 1, 'the late resolution must not check the rest');
+	t.deepEqual(outcome.results, resultsSnapshot);
 });
