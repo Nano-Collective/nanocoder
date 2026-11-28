@@ -7,7 +7,7 @@ import {getContainedSessionCwd} from '@/services/session-cwd';
 import type {NanocoderToolExport} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {formatError} from '@/utils/error-formatter';
-import {findMatchingPaths} from '@/utils/fs/file-search';
+import {findMatchingPaths, normalizeMaxResults} from '@/utils/fs/file-search';
 import {estimateTokens} from '@/utils/token-calculator';
 
 /**
@@ -30,8 +30,9 @@ const executeFindFiles = async (args: FindFilesArgs): Promise<string> => {
 	// Clamp to the project root: a bash `cd` outside the project must not turn a
 	// pathless find into a glob over the whole filesystem.
 	const cwd = getContainedSessionCwd();
-	const maxResults = Math.min(
-		args.maxResults || DEFAULT_FIND_FILES_RESULTS,
+	const maxResults = normalizeMaxResults(
+		args.maxResults,
+		DEFAULT_FIND_FILES_RESULTS,
 		MAX_FIND_FILES_RESULTS,
 	);
 
@@ -71,6 +72,7 @@ const findFilesCoreTool = tool({
 			},
 			maxResults: {
 				type: 'number',
+				minimum: 1,
 				description:
 					'Maximum number of results to return (default: 50, max: 100)',
 			},

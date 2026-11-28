@@ -20,6 +20,24 @@ const MAX_MATCH_CONTENT_LENGTH = 300;
 const DEFAULT_SEARCH_TIMEOUT_MS = 30_000;
 const MAX_RAW_FILES_SCANNED = 50_000;
 
+/**
+ * Normalize a caller-supplied `maxResults` limit (number or numeric string)
+ * to an integer in `[1, maxLimit]`, falling back to `defaultLimit` for
+ * missing, non-positive, non-numeric, or non-finite values.
+ */
+export function normalizeMaxResults(
+	raw: unknown,
+	defaultLimit: number,
+	maxLimit: number,
+): number {
+	const parsed =
+		typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw;
+	if (typeof parsed !== 'number' || !Number.isFinite(parsed) || parsed <= 0) {
+		return defaultLimit;
+	}
+	return Math.max(1, Math.min(Math.floor(parsed), maxLimit));
+}
+
 export class SearchTimeoutError extends Error {
 	constructor(timeoutMs: number) {
 		super(

@@ -2102,3 +2102,38 @@ test('SearchFileContentsFormatter caps a long hit list like bash output', t => {
 	t.notRegex(output, /src\/file21\.ts/);
 	t.regex(output, /\+5 more lines/);
 });
+
+test.serial('search_file_contents handles negative and fractional maxResults safely', async t => {
+	const {mkdtempSync, rmSync, writeFileSync} = await import('node:fs');
+	const {tmpdir} = await import('node:os');
+	const {join} = await import('node:path');
+	const testDir = mkdtempSync(join(tmpdir(), 'nanocoder-search-limit-'));
+	try {
+		writeFileSync(
+			join(testDir, 'sample.ts'),
+			'const hit1 = 1;\nconst hit2 = 2;\nconst hit3 = 3;\n',
+		);
+		const originalCwd = process.cwd();
+		process.chdir(testDir);
+		try {
+			// biome-ignore lint/suspicious/noExplicitAny: Test calling tool execute directly
+			const execute = (searchFileContentsTool.tool as any).execute;
+			const negResult = await execute(
+				{query: 'hit', maxResults: -1},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(negResult.includes('Found 3 matches'));
+
+			const fracResult = await execute(
+				{query: 'hit', maxResults: 2.5},
+				{toolCallId: 'test', messages: []},
+			);
+			t.true(fracResult.includes('(showing first 2)'));
+			t.false(fracResult.includes('2.5'));
+		} finally {
+			process.chdir(originalCwd);
+		}
+	} finally {
+		rmSync(testDir, {recursive: true, force: true});
+	}
+});
