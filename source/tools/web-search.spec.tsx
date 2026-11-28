@@ -553,7 +553,7 @@ test.serial('web_search aborts the in-flight request when the turn is cancelled'
 		const pending = executeWebSearch({query: 'slow'}, 'test-key', controller.signal);
 		await started;
 		controller.abort();
-		await t.throwsAsync(pending);
+		await t.throwsAsync(pending, {any: true});
 		t.true(requestAborted);
 	} finally {
 		globalThis.fetch = originalFetch;

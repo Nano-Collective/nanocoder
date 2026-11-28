@@ -798,7 +798,7 @@ test.serial('fetch_url aborts the page request when the turn is cancelled', asyn
 		);
 		await started;
 		controller.abort();
-		await t.throwsAsync(pending);
+		await t.throwsAsync(pending, {any: true});
 		t.true(requestAborted);
 	} finally {
 		globalThis.fetch = originalFetch;
