@@ -7,7 +7,7 @@ import test from 'ava';
 import {render} from 'ink-testing-library';
 import {ThemeContext} from '../../hooks/useTheme';
 import {themes} from '../../config/themes';
-import {gitCommitTool} from './git-commit';
+import {extractCommitHash, gitCommitTool} from './git-commit';
 
 // ============================================================================
 // Test Helpers
@@ -182,4 +182,17 @@ test('git_commit validator rejects whitespace-only message', async t => {
 
 	const result = await validator({message: '   '});
 	t.false(result.valid);
+});
+
+// ============================================================================
+// Commit Hash Extraction Tests
+// ============================================================================
+
+test('extractCommitHash parses branches with /, ., root-commit, and detached HEAD', t => {
+	t.is(extractCommitHash('[feat/add-thing 17042d5] second\n 1 file changed'), '17042d5');
+	t.is(extractCommitHash('[release-1.2 cdc6da8] third'), 'cdc6da8');
+	t.is(extractCommitHash('[main (root-commit) 5154ff4] first'), '5154ff4');
+	t.is(extractCommitHash('[detached HEAD 3ab119d] message'), '3ab119d');
+	t.is(extractCommitHash('[main abc1234] standard'), 'abc1234');
+	t.is(extractCommitHash('unexpected output'), null);
 });

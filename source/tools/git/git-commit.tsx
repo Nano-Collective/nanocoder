@@ -75,6 +75,12 @@ async function getCommitPreview(args: GitCommitInput): Promise<{
 // Execution
 // ============================================================================
 
+/** Extract the short commit hash from `git commit` summary output. */
+export function extractCommitHash(output: string): string | null {
+	const match = output.match(/^\[[^\]]+\s+([a-f0-9]+)\]/m);
+	return match ? match[1] : null;
+}
+
 const executeGitCommit = async (args: GitCommitInput): Promise<string> => {
 	try {
 		// Check for staged changes (unless amending)
@@ -108,9 +114,9 @@ const executeGitCommit = async (args: GitCommitInput): Promise<string> => {
 		const lines: string[] = [];
 
 		// Extract commit hash if present
-		const hashMatch = output.match(/\[[\w-]+\s+([a-f0-9]+)\]/);
-		if (hashMatch) {
-			lines.push(`Commit created: ${hashMatch[1]}`);
+		const commitHash = extractCommitHash(output);
+		if (commitHash) {
+			lines.push(`Commit created: ${commitHash}`);
 		} else {
 			lines.push('Commit created successfully.');
 		}
