@@ -3,6 +3,7 @@ import {
 	resetSessionContextLimit,
 	setSessionContextLimit,
 } from '@/models/index';
+import {createTokenizer} from '@/tokenization/index';
 import type {LLMChatResponse, LLMClient, Message} from '@/types/core';
 import {jsonSchema, tool} from '@/types/core';
 import {
@@ -369,23 +370,26 @@ test('performAutoCompact returns null when below threshold', async t => {
 });
 
 test('performAutoCompact counts native tool definitions toward the gate (fires when messages alone would not)', async t => {
-	// 1000-token window, 50% threshold → needs ≥500 tokens. The message + system
-	// prompt alone stay well under, so only the tool definitions can trip it.
-	setupAutoCompactEnv(1000);
+	// 6,000-token window, 50% threshold → needs ≥3,000 tokens. Neither the
+	// messages (~2,000 tokens) nor the fixed overhead (~2,030 tokens) crosses
+	// 3,000 alone, so only their sum (~4,030 tokens) trips the gate.
+	setupAutoCompactEnv(6000);
 
 	const messages: Message[] = [
-		{role: 'user', content: 'Tell me a story. '.repeat(10)}, // ~170 chars ≈ 43 tokens
+		{
+			role: 'user',
+			content: Array.from({length: 1000}, (_, i) => `word${i}`).join(' '),
+		},
 	];
 	const systemMessage: Message = {
 		role: 'system',
 		content: 'You are a helpful assistant.',
 	};
-	// A fat tool definition built from distinct words so it tokenizes to many
-	// thousands of tokens under *any* tokenizer (avoids the BPE run-merging that
-	// repeated chars would trigger). Far above the 500-token gate on its own,
-	// while the message + system prompt stay far below it.
+	// A tool definition built from distinct words so it tokenizes to ~2,020
+	// tokens under *any* tokenizer (avoids BPE run-merging): under the 3,000-token
+	// gate on its own, yet pushes the conversation past it when combined.
 	const bigDescription = Array.from(
-		{length: 2000},
+		{length: 1000},
 		(_, i) => `param${i}`,
 	).join(' ');
 	const nativeTools = {
@@ -977,18 +981,21 @@ test('maybeAutoCompact leaves history unchanged when performAutoCompact throws',
 });
 
 test('maybeAutoCompact omits native tools from the gate when toolsDisabled', async t => {
-	setupAutoCompactEnv(1000);
+	setupAutoCompactEnv(6000);
 	setAutoCompactStrategy('mechanical');
 	setAutoCompactThreshold(50);
 
 	const nativeTools = {
 		big_tool: tool({
-			description: Array.from({length: 2000}, (_, i) => `param${i}`).join(' '),
+			description: Array.from({length: 1000}, (_, i) => `param${i}`).join(' '),
 			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
 		}),
 	};
 	const messages: Message[] = [
-		{role: 'user', content: 'Tell me a story. '.repeat(10)},
+		{
+			role: 'user',
+			content: Array.from({length: 1000}, (_, i) => `word${i}`).join(' '),
+		},
 	];
 	const systemMessage: Message = {
 		role: 'system',
@@ -1009,6 +1016,371 @@ test('maybeAutoCompact omits native tools from the gate when toolsDisabled', asy
 		nativeTools,
 	);
 	t.not(withTools, messages);
+});
+
+test('maybeAutoCompact skips compaction and warns once when fixed overhead exceeds the limit', async t => {
+	// Regression for #2404: when system prompt + tool definitions already exceed
+	// the context limit (e.g. /context-max 8k with default tools), compacting
+	// messages can never bring usage under the threshold and must not run or
+	// invoke the LLM summariser after every turn.
+	setupAutoCompactEnv(8000);
+	setAutoCompactStrategy('llm');
+	setAutoCompactThreshold(80);
+
+	const systemMessage: Message = {
+		role: 'system',
+		content: Array.from({length: 2500}, (_, i) => `rule${i}`).join(' '),
+	};
+	const nativeTools = {
+		big_tool: tool({
+			description: Array.from({length: 4000}, (_, i) => `toolparam${i}`).join(
+				' ',
+			),
+			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
+		}),
+	};
+	const client = makeStubClient(() => '## Context\nshould not be called');
+	const notifications: string[] = [];
+
+	// Turn 1: short exchange, fixed overhead alone exceeds 8k limit.
+	const turn1: Message[] = [
+		{role: 'user', content: 'hi'},
+		{role: 'assistant', content: 'hello'},
+	];
+	const res1 = await maybeAutoCompact(turn1, systemMessage, client, nativeTools, {
+		onNotify: msg => notifications.push(msg),
+	});
+
+	t.is(res1, turn1, 'turn 1 must skip compaction and return messages unchanged');
+	t.is(client.calls, 0, 'summariser must not be called on turn 1');
+	t.is(notifications.length, 1, 'warning must be shown once on turn 1');
+	t.true(
+		notifications[0].includes('system prompt and tool definitions'),
+		'warning should name system prompt and tool definitions',
+	);
+	t.true(
+		notifications[0].includes('8,000 tokens'),
+		'warning should include the context limit',
+	);
+	t.true(
+		notifications[0].includes('/tune') && notifications[0].includes('nano'),
+		'warning should name /tune and a smaller tool profile',
+	);
+
+	// Turn 2: more messages (enough that summariseWithLLM would otherwise run).
+	// Neither compaction nor the warning should fire again.
+	const turn2: Message[] = [
+		...turn1,
+		{role: 'user', content: 'second message'},
+		{role: 'assistant', content: 'second reply'},
+	];
+	const res2 = await maybeAutoCompact(turn2, systemMessage, client, nativeTools, {
+		onNotify: msg => notifications.push(msg),
+	});
+
+	t.is(res2, turn2, 'turn 2 must still skip compaction');
+	t.is(client.calls, 0, 'summariser must not be called on turn 2');
+	t.is(notifications.length, 1, 'warning must not repeat on turn 2');
+
+	// A subagent call in the same session has smaller fixed overhead (under the
+	// threshold) and passes no onNotify; it must not reset the parent's warning.
+	await maybeAutoCompact(
+		[{role: 'user', content: 'subagent task'}],
+		{role: 'system', content: 'Short subagent prompt.'},
+		client,
+	);
+	const res3 = await maybeAutoCompact(turn2, systemMessage, client, nativeTools, {
+		onNotify: msg => notifications.push(msg),
+	});
+	t.is(res3, turn2, 'turn 3 must still skip compaction');
+	t.is(
+		notifications.length,
+		1,
+		'warning must not repeat after a smaller subagent call in the same session',
+	);
+});
+
+test('maybeAutoCompact re-warns once when the context limit changes and still cannot fit fixed overhead', async t => {
+	setupAutoCompactEnv(1000);
+	setAutoCompactStrategy('llm');
+	setAutoCompactThreshold(80);
+
+	const systemMessage: Message = {
+		role: 'system',
+		content: Array.from({length: 1000}, (_, i) => `rule${i}`).join(' '),
+	};
+	const client = makeStubClient(() => '## Context\nshould not be called');
+	const notifications: string[] = [];
+	const messages: Message[] = [
+		{role: 'user', content: 'turn 1'},
+		{role: 'assistant', content: 'reply 1'},
+		{role: 'user', content: 'turn 2'},
+		{role: 'assistant', content: 'reply 2'},
+	];
+
+	await maybeAutoCompact(messages, systemMessage, client, undefined, {
+		onNotify: msg => notifications.push(msg),
+	});
+	t.is(notifications.length, 1);
+	t.true(
+		notifications[0].includes('system prompt uses'),
+		'warning without native tools should refer to system prompt',
+	);
+
+	// Changing to another too-small limit surfaces one updated warning.
+	setSessionContextLimit(1200);
+	await maybeAutoCompact(messages, systemMessage, client, undefined, {
+		onNotify: msg => notifications.push(msg),
+	});
+	await maybeAutoCompact(messages, systemMessage, client, undefined, {
+		onNotify: msg => notifications.push(msg),
+	});
+	t.is(notifications.length, 2, 'new limit warns once, not twice');
+	t.true(notifications[1].includes('1,200 tokens'));
+	t.is(client.calls, 0);
+});
+
+test('performAutoCompact skips while total fits and compacts once total reaches limit when fixed overhead sits between threshold and limit', async t => {
+	// Fixed overhead (~250 tokens for system prompt) sits between the 50%
+	// threshold (200 tokens) and the 400-token context limit.
+	setupAutoCompactEnv(400);
+
+	const systemMessage: Message = {
+		role: 'system',
+		content: Array.from({length: 120}, (_, i) => `directive${i}`).join(' '),
+	};
+	const config = {
+		enabled: true,
+		threshold: 50,
+		mode: 'default' as const,
+		strategy: 'llm' as const,
+		notifyUser: true,
+	};
+	const client = makeStubClient(() => '## Context\nBrief summary.');
+	const notifications: string[] = [];
+
+	// While total usage still fits under the 400-token limit, skip compaction
+	// and emit the fixed-overhead warning once.
+	const fittingTurn1: Message[] = [
+		{role: 'user', content: 'first message'},
+		{role: 'assistant', content: 'first reply'},
+		{role: 'user', content: 'second message'},
+		{role: 'assistant', content: 'second reply'},
+	];
+	const res1 = await performAutoCompact(
+		fittingTurn1,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.is(res1, null, 'must skip compaction while total still fits in the limit');
+	t.is(client.calls, 0, 'must not call summariser while total fits');
+	t.is(notifications.length, 1, 'must emit warning once');
+	t.true(
+		notifications[0].includes('Auto-compaction skipped') &&
+			notifications[0].includes('/tune'),
+		'warning should explain the skip and point to /tune',
+	);
+
+	// Another turn that still fits must stay skipped without repeating the warning.
+	const fittingTurn2: Message[] = [
+		...fittingTurn1,
+		{role: 'user', content: 'third message'},
+		{role: 'assistant', content: 'third reply'},
+	];
+	const res2 = await performAutoCompact(
+		fittingTurn2,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.is(res2, null, 'second fitting turn must also skip compaction');
+	t.is(client.calls, 0, 'must still not call summariser');
+	t.is(notifications.length, 1, 'must not repeat warning on subsequent fitting turn');
+
+	// Once conversation history pushes total usage to/past the 400-token limit,
+	// compaction must run so the next request fits in the window.
+	const overflowMessages: Message[] = [
+		{
+			role: 'user',
+			content: Array.from({length: 120}, (_, i) => `history${i}`).join(' '),
+		},
+		{role: 'assistant', content: 'acknowledged'},
+		{role: 'user', content: 'latest question'},
+		{role: 'assistant', content: 'latest answer'},
+	];
+	const compacted = await performAutoCompact(
+		overflowMessages,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.truthy(
+		compacted,
+		'must still compact once total usage reaches the context limit',
+	);
+	t.is(client.calls, 1, 'must invoke summariser LLM when total hits the limit');
+	t.true(
+		compacted!.some(m => (m.content || '').includes('<conversation-summary>')),
+		'compacted history must contain the LLM summary',
+	);
+
+	// After compaction brings total back under the limit, skipping resumes
+	// without re-emitting the fixed-overhead warning for the same limit/threshold.
+	const skipWarningsBefore = notifications.filter(n =>
+		n.includes('Auto-compaction skipped'),
+	).length;
+	const afterCompact = await performAutoCompact(
+		compacted!,
+		systemMessage,
+		'custom',
+		'generic-model',
+		config,
+		msg => notifications.push(msg),
+		client,
+	);
+	t.is(
+		afterCompact,
+		null,
+		'post-compaction history that fits under the limit must skip again',
+	);
+	t.is(client.calls, 1, 'must not re-invoke summariser after history fits again');
+	const skipWarningsAfter = notifications.filter(n =>
+		n.includes('Auto-compaction skipped'),
+	).length;
+	t.is(
+		skipWarningsAfter,
+		skipWarningsBefore,
+		'must not re-emit the fixed-overhead warning after compacting back under the limit',
+	);
+});
+
+test('performAutoCompact compacts when fixed overhead sits in the threshold..limit band and total is past the halfway point but still under the limit', async t => {
+	const contextLimit = 400;
+	setupAutoCompactEnv(contextLimit);
+
+	const systemMessage: Message = {
+		role: 'system',
+		content: Array.from({length: 120}, (_, i) => `directive${i}`).join(' '),
+	};
+	const messages: Message[] = [
+		{
+			role: 'user',
+			content: Array.from({length: 35}, (_, i) => `topic${i}`).join(' '),
+		},
+		{role: 'assistant', content: 'acknowledged'},
+		{role: 'user', content: 'follow-up question'},
+		{role: 'assistant', content: 'follow-up answer'},
+	];
+
+	// Verify the fixture actually falls in the target region:
+	// threshold < fixed < halfway <= total < contextLimit.
+	const tokenizer = createTokenizer('custom', 'generic-model');
+	try {
+		const fixedTokens = tokenizer.countTokens(systemMessage);
+		const conversationTokens = messages.reduce(
+			(sum, msg) => sum + tokenizer.countTokens(msg),
+			0,
+		);
+		const totalTokens = fixedTokens + conversationTokens;
+		const halfway = fixedTokens + (contextLimit - fixedTokens) / 2;
+		t.true(
+			fixedTokens >= contextLimit * 0.5 && fixedTokens < contextLimit,
+			`expected fixedTokens (${fixedTokens}) in [200, 400)`,
+		);
+		t.true(
+			totalTokens >= halfway && totalTokens < contextLimit,
+			`expected totalTokens (${totalTokens}) in [${halfway}, ${contextLimit})`,
+		);
+	} finally {
+		tokenizer.free?.();
+	}
+
+	const client = makeStubClient(() => '## Context\nBrief summary.');
+	const notifications: string[] = [];
+	const compacted = await performAutoCompact(
+		messages,
+		systemMessage,
+		'custom',
+		'generic-model',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		msg => notifications.push(msg),
+		client,
+	);
+
+	t.truthy(
+		compacted,
+		'must compact once total usage crosses the halfway point to the limit',
+	);
+	t.is(client.calls, 1, 'must invoke summariser LLM past the halfway point');
+	t.true(
+		compacted!.some(m => (m.content || '').includes('<conversation-summary>')),
+		'compacted history must contain the LLM summary',
+	);
+	t.false(
+		notifications.some(n => n.includes('Auto-compaction skipped')),
+		'must not emit a skip warning when compaction runs',
+	);
+});
+
+test('maybeAutoCompact still compacts normally when fixed overhead is under threshold and messages exceed it', async t => {
+	setupAutoCompactEnv(2000);
+	setAutoCompactStrategy('llm');
+	setAutoCompactThreshold(50);
+
+	const systemMessage: Message = {
+		role: 'system',
+		content: 'You are a helpful assistant.',
+	};
+	const nativeTools = {
+		small_tool: tool({
+			description: 'Read a file from disk.',
+			inputSchema: jsonSchema<Record<string, never>>({type: 'object'}),
+		}),
+	};
+	const bigTurn = Array.from({length: 900}, (_, i) => `detail${i}`).join(' ');
+	const messages: Message[] = [
+		{role: 'user', content: bigTurn},
+		{role: 'assistant', content: 'acknowledged'},
+		{role: 'user', content: 'latest question'},
+		{role: 'assistant', content: 'latest answer'},
+	];
+	const client = makeStubClient(() => '## Context\nBrief summary.');
+	const notifications: string[] = [];
+
+	const result = await maybeAutoCompact(
+		messages,
+		systemMessage,
+		client,
+		nativeTools,
+		{onNotify: msg => notifications.push(msg)},
+	);
+
+	t.not(result, messages, 'normal case must still compact');
+	t.is(client.calls, 1, 'LLM summariser must run once');
+	t.true(
+		result.some(m => (m.content || '').includes('<conversation-summary>')),
+		'compacted history must contain the LLM summary',
+	);
+	t.false(
+		notifications.some(n => n.includes('Auto-compaction skipped')),
+		'must not emit the fixed-overhead warning',
+	);
 });
 
 test('maybeAutoCompact uses caller-supplied provider and model over the client', async t => {

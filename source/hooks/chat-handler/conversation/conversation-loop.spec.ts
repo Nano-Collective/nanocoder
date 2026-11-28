@@ -2447,9 +2447,10 @@ test.serial('processAssistantResponse - final messages are compacted when no too
 });
 
 test.serial('processAssistantResponse - confirmation gate operates on compacted messages after auto-compact', async t => {
-	// Context limit high enough that first turn compresses but second turn doesn't
-	// re-trigger (prevents infinite LLM summarization loop).
-	setSessionContextLimit(200);
+	// Context limit high enough that fixed overhead (system prompt + mock tool
+	// definition) stays under the 50% threshold and the second turn does not
+	// re-trigger compaction.
+	setSessionContextLimit(600);
 
 	const oldVerboseContent = 'old verbose context sentence. '.repeat(60);
 	// Multiple old messages so some are outside keepRecent=2 window.
@@ -2506,9 +2507,10 @@ test.serial('processAssistantResponse - confirmation gate operates on compacted 
 });
 
 test.serial('processAssistantResponse - tool execution result appends to compacted messages (not original)', async t => {
-	// Context limit high enough that first turn compresses but subsequent turns don't
-	// re-trigger (prevents infinite LLM summarization loop during recursion).
-	setSessionContextLimit(200);
+	// Context limit high enough that fixed overhead (system prompt + mock tool
+	// definition) stays under the 50% threshold and subsequent turns do not
+	// re-trigger compaction.
+	setSessionContextLimit(600);
 
 	const oldVerboseContent = 'old verbose context sentence. '.repeat(60);
 	// Multiple old messages so some are outside keepRecent=2 window.
