@@ -61,6 +61,28 @@ import {type ClientTransport, TransportFactory} from './transport-factory.js';
 /** The longest delay Node's setTimeout accepts (about 24.8 days). */
 const MAX_TIMER_MS = 2_147_483_647;
 
+/**
+ * The SDK's list methods return one page each. Follow `nextCursor` until the
+ * server stops sending one, or repeats one it already sent.
+ */
+async function listAllPages<T>(
+	fetchPage: (
+		params: {cursor: string} | undefined,
+	) => Promise<{items: T[]; nextCursor?: string}>,
+): Promise<T[]> {
+	const items: T[] = [];
+	const seen = new Set<string>();
+	let params: {cursor: string} | undefined;
+	for (;;) {
+		const page = await fetchPage(params);
+		items.push(...page.items);
+		const cursor = page.nextCursor;
+		if (cursor === undefined || seen.has(cursor)) return items;
+		seen.add(cursor);
+		params = {cursor};
+	}
+}
+
 export class MCPClient {
 	private clients: Map<string, Client> = new Map();
 	private transports: Map<string, ClientTransport> = new Map();
@@ -155,19 +177,23 @@ export class MCPClient {
 		client: Client,
 	): Promise<number> {
 		// Re-discover tools from this server
-		const toolsResult = await client.listTools();
-		const tools: MCPTool[] = toolsResult.tools.map(tool =>
-			toMCPTool(tool, serverName),
-		);
+		const sdkTools = await listAllPages(async cursor => {
+			const page = await client.listTools(cursor);
+			return {items: page.tools, nextCursor: page.nextCursor};
+		});
+		const tools: MCPTool[] = sdkTools.map(tool => toMCPTool(tool, serverName));
 		this.serverTools.set(serverName, tools);
 
 		// Re-discover resources if declared
 		const capabilities = client.getServerCapabilities();
 		if (capabilities?.resources) {
 			try {
-				const resourcesResult = await client.listResources();
-				const resources: MCPResource[] = resourcesResult.resources.map(
-					resource => toMCPResource(resource, serverName),
+				const sdkResources = await listAllPages(async cursor => {
+					const page = await client.listResources(cursor);
+					return {items: page.resources, nextCursor: page.nextCursor};
+				});
+				const resources: MCPResource[] = sdkResources.map(resource =>
+					toMCPResource(resource, serverName),
 				);
 				this.serverResources.set(serverName, resources);
 			} catch (error) {
@@ -181,8 +207,11 @@ export class MCPClient {
 		// Re-discover prompts if declared
 		if (capabilities?.prompts) {
 			try {
-				const promptsResult = await client.listPrompts();
-				const prompts: MCPPrompt[] = promptsResult.prompts.map(prompt =>
+				const sdkPrompts = await listAllPages(async cursor => {
+					const page = await client.listPrompts(cursor);
+					return {items: page.prompts, nextCursor: page.nextCursor};
+				});
+				const prompts: MCPPrompt[] = sdkPrompts.map(prompt =>
 					toMCPPrompt(prompt, serverName),
 				);
 				this.serverPrompts.set(serverName, prompts);
@@ -310,8 +339,12 @@ export class MCPClient {
 				// List available tools from this server. Do this before registering
 				// the server so a failed tools/list doesn't leave it visible as
 				// connected — the maps are populated only once discovery succeeds.
-				const toolsResult = await client.listTools(undefined, connectOptions);
-				const tools: MCPTool[] = toolsResult.tools.map(tool =>
+				const connected = client;
+				const sdkTools = await listAllPages(async cursor => {
+					const page = await connected.listTools(cursor, connectOptions);
+					return {items: page.tools, nextCursor: page.nextCursor};
+				});
+				const tools: MCPTool[] = sdkTools.map(tool =>
 					toMCPTool(tool, normalizedServer.name),
 				);
 
@@ -326,8 +359,11 @@ export class MCPClient {
 				let resources: MCPResource[] = [];
 				if (capabilities?.resources) {
 					try {
-						const resourcesResult = await client.listResources();
-						resources = resourcesResult.resources.map(resource =>
+						const sdkResources = await listAllPages(async cursor => {
+							const page = await connected.listResources(cursor);
+							return {items: page.resources, nextCursor: page.nextCursor};
+						});
+						resources = sdkResources.map(resource =>
 							toMCPResource(resource, normalizedServer.name),
 						);
 						this.logger.debug('MCP resources discovered', {
@@ -358,8 +394,11 @@ export class MCPClient {
 				let prompts: MCPPrompt[] = [];
 				if (capabilities?.prompts) {
 					try {
-						const promptsResult = await client.listPrompts();
-						prompts = promptsResult.prompts.map(prompt =>
+						const sdkPrompts = await listAllPages(async cursor => {
+							const page = await connected.listPrompts(cursor);
+							return {items: page.prompts, nextCursor: page.nextCursor};
+						});
+						prompts = sdkPrompts.map(prompt =>
 							toMCPPrompt(prompt, normalizedServer.name),
 						);
 						this.logger.debug('MCP prompts discovered', {
