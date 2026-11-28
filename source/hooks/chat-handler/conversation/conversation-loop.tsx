@@ -115,6 +115,8 @@ interface ProcessAssistantResponseParams {
 	privacyEnabled?: boolean;
 	sessionId?: string;
 	workingDirectory?: string;
+	/** Shared id of this prompt's timeline marker and tool checkpoints. */
+	turnId?: string;
 	onPrivacyEvent?: (scrubbedDelta: number) => void;
 	onToolExecuted?: (toolName: string) => void;
 	onFinalAssistantText?: (content: string) => void;
@@ -192,6 +194,7 @@ export const processAssistantResponse = async (
 		onToolExecuted,
 		sessionId,
 		workingDirectory,
+		turnId,
 	} = params;
 	const walkthroughLifecycle = createWalkthroughLifecycle(messages);
 
@@ -388,6 +391,8 @@ export const processAssistantResponse = async (
 			currentModel,
 			sessionId,
 			workingDirectory,
+			timelineTurnId: turnId,
+			timelineMessageIndex: history.length,
 			onToolExecuted,
 			walkthroughLifecycle,
 			turnStartMessages,

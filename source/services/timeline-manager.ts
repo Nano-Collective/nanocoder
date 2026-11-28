@@ -12,6 +12,7 @@ import type {
 	TimelineEntryMeta,
 	TimelineIndex,
 	TimelineIndexEntry,
+	TimelineRevertPlan,
 	TimelineRevertResult,
 	TimelineScanResult,
 } from '@/types/timeline';
@@ -36,7 +37,11 @@ import {
  * This repo gitignores `.nanocoder/timeline/`, but user projects will not, so
  * the exclusion has to live here rather than rely on `git ls-files` filtering.
  */
-const EXCLUDED_PREFIXES = ['.nanocoder/timeline/', '.nanocoder/checkpoints/'];
+const EXCLUDED_PREFIXES = [
+	'.nanocoder/timeline/',
+	'.nanocoder/checkpoints/',
+	'.nanocoder/.gitignore',
+];
 
 /** Checkpoint ids are `crypto.randomUUID()`, and become a directory name. */
 const ENTRY_ID_PATTERN =
@@ -315,7 +320,10 @@ export class TimelineManager {
 	async capture(
 		input: TimelineCaptureInput,
 	): Promise<TimelineEntryMeta | null> {
-		if (input.files.size === 0) {
+		// A `/rewind` point exists even when the prompt changed nothing: the
+		// conversation still needs restoring. Tool checkpoints keep requiring a
+		// file, so an ACP capture with no paths stays a no-op.
+		if (input.files.size === 0 && !input.promptText) {
 			return null;
 		}
 
@@ -337,7 +345,7 @@ export class TimelineManager {
 			}
 		}
 
-		if (createdFiles.length === 0 && existing.size === 0) {
+		if (createdFiles.length === 0 && existing.size === 0 && !input.promptText) {
 			return null;
 		}
 
@@ -353,6 +361,8 @@ export class TimelineManager {
 			filesChanged: [...existing.keys(), ...createdFiles],
 			createdFiles,
 			...(input.turnId ? {turnId: input.turnId} : {}),
+			...(input.promptText ? {promptText: input.promptText} : {}),
+			...(input.messageId ? {messageId: input.messageId} : {}),
 		};
 
 		if (existing.size > 0) {
@@ -373,6 +383,42 @@ export class TimelineManager {
 		return this.toMeta(entry);
 	}
 
+	/**
+	 * The files reverting to `checkpointId` would write and delete, computed
+	 * without touching the workspace so the picker can ask first.
+	 *
+	 * Entries are walked oldest-first: the first entry that mentions a path
+	 * decides whether it is restored or deleted, because `revertTo` applies
+	 * them newest-first and the oldest before-image is the one left on disk.
+	 */
+	async describeRevert(checkpointId: string): Promise<TimelineRevertPlan> {
+		const index = await this.loadIndex();
+		const found = index.entries.findIndex(entry => entry.id === checkpointId);
+		if (found === -1) {
+			throw new Error(`Timeline checkpoint '${checkpointId}' does not exist`);
+		}
+
+		const targetIndex = this.expandToTurnStart(index, found);
+		const restore: string[] = [];
+		const remove: string[] = [];
+		const classified = new Set<string>();
+
+		for (const entry of index.entries.slice(targetIndex)) {
+			const created = new Set(entry.createdFiles);
+			for (const filePath of entry.filesChanged) {
+				if (classified.has(filePath)) continue;
+				classified.add(filePath);
+				if (created.has(filePath)) {
+					remove.push(filePath);
+				} else {
+					restore.push(filePath);
+				}
+			}
+		}
+
+		return {restore, remove};
+	}
+
 	async revertTo(checkpointId: string): Promise<TimelineRevertResult> {
 		const index = await this.loadIndex();
 		const found = index.entries.findIndex(entry => entry.id === checkpointId);
@@ -391,10 +437,12 @@ export class TimelineManager {
 
 		const toRevert = index.entries.slice(targetIndex).reverse();
 		const filesRestored: string[] = [];
+		const filesFailed: string[] = [];
 
 		for (const entry of toRevert) {
-			const restored = await this.restoreEntry(entry);
-			filesRestored.push(...restored);
+			const result = await this.restoreEntry(entry);
+			filesRestored.push(...result.restored);
+			filesFailed.push(...result.failed);
 		}
 
 		index.entries = index.entries.slice(0, targetIndex);
@@ -407,7 +455,28 @@ export class TimelineManager {
 		return {
 			revertedTo: this.toMeta(toRevert[toRevert.length - 1]),
 			filesRestored: [...new Set(filesRestored)],
+			filesFailed: [...new Set(filesFailed)],
 		};
+	}
+
+	/**
+	 * Drop `checkpointId` and every entry after it without restoring files.
+	 * Used when only the conversation is rewound. Matching on the entry's
+	 * position rather than a message index keeps this correct after compaction
+	 * renumbers the history.
+	 */
+	async truncateFrom(checkpointId: string): Promise<void> {
+		const index = await this.loadIndex();
+		const found = index.entries.findIndex(entry => entry.id === checkpointId);
+		if (found === -1) return;
+
+		const removed = index.entries.slice(found);
+		index.entries = index.entries.slice(0, found);
+		await this.saveIndex(index);
+
+		for (const entry of removed) {
+			await this.removeEntryDir(entry.id);
+		}
 	}
 
 	async clear(): Promise<void> {
@@ -468,8 +537,11 @@ export class TimelineManager {
 		return start;
 	}
 
-	private async restoreEntry(entry: TimelineIndexEntry): Promise<string[]> {
+	private async restoreEntry(
+		entry: TimelineIndexEntry,
+	): Promise<{restored: string[]; failed: string[]}> {
 		const restored: string[] = [];
+		const failed: string[] = [];
 		const created = new Set(entry.createdFiles);
 		const snapshots = new Map<string, Buffer>();
 		const filesDir = this.entryFilesDir(entry.id);
@@ -491,6 +563,7 @@ export class TimelineManager {
 					await this.fileSnapshotService.deleteFile(relativePath);
 					restored.push(relativePath);
 				} catch (error) {
+					failed.push(relativePath);
 					notifyWarning('Could not delete created timeline file', true, {
 						context: {
 							relativePath,
@@ -517,11 +590,15 @@ export class TimelineManager {
 		}
 
 		if (snapshots.size > 0) {
-			await this.fileSnapshotService.restoreFiles(snapshots);
-			restored.push(...snapshots.keys());
+			// Per-path results: a failure part way must report what already
+			// landed, not discard the whole batch.
+			const result =
+				await this.fileSnapshotService.restoreFilesDetailed(snapshots);
+			restored.push(...result.restored);
+			failed.push(...result.failed);
 		}
 
-		return restored;
+		return {restored, failed};
 	}
 
 	private async pruneOldest(index: TimelineIndex): Promise<void> {
@@ -560,6 +637,8 @@ export class TimelineManager {
 			filesChanged: entry.filesChanged,
 			createdFiles: entry.createdFiles,
 			...(entry.turnId ? {turnId: entry.turnId} : {}),
+			...(entry.promptText ? {promptText: entry.promptText} : {}),
+			...(entry.messageId ? {messageId: entry.messageId} : {}),
 		};
 	}
 

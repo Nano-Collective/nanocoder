@@ -1,3 +1,8 @@
+import {
+	beginTimelineCapture,
+	finishTimelineCapture,
+	type TimelineCaptureContext,
+} from '@/acp/acp-timeline';
 import type {CustomCommandLoader} from '@/custom-commands/loader';
 import {invalidArgumentsResult} from '@/hooks/chat-handler/utils/tool-filters';
 import {maybeAutoCommit} from '@/services/auto-commit';
@@ -6,6 +11,8 @@ import {
 	appendPostToolUseOutput,
 	runPreToolUseGate,
 } from '@/services/lifecycle-hooks';
+import {getSessionTimeline} from '@/services/rewind';
+import type {TimelineManager} from '@/services/timeline-manager';
 import {parseToolArguments} from '@/tools/runtime/tool-args-parser';
 import {createCancellationResults} from '@/tools/runtime/tool-cancellation';
 import {toolErrorToContent} from '@/tools/runtime/tool-validation';
@@ -102,7 +109,49 @@ export async function processToolUse(
 			};
 		}
 
-		const result = await handler(parsedArgs, options);
+		// Per-tool before-images, only for the interactive loop: it sets turnId
+		// so `/rewind` can put back exactly the files a turn touched. ACP wraps
+		// its own capture and never sets it here, so the two cannot double up.
+		let captureTimeline: TimelineManager | null = null;
+		let timelineCapture: TimelineCaptureContext = null;
+		if (options?.turnId && options.sessionId) {
+			try {
+				captureTimeline = getSessionTimeline(
+					options.sessionId,
+					options.workingDirectory,
+				);
+				const captureTools = options.toolManager ?? getToolManager();
+				if (captureTimeline && captureTools) {
+					timelineCapture = await beginTimelineCapture(
+						{timeline: captureTimeline},
+						captureTools,
+						toolCall,
+						options.timelineMessageIndex ?? 0,
+						toolCall.function.name,
+						options.turnId,
+					);
+				}
+			} catch {
+				// A checkpoint is best-effort: never stop the tool over it.
+			}
+		}
+
+		const result = await (async () => {
+			try {
+				return await handler(parsedArgs, options);
+			} finally {
+				if (captureTimeline) {
+					try {
+						await finishTimelineCapture(
+							{timeline: captureTimeline},
+							timelineCapture,
+						);
+					} catch {
+						// Same: the tool already ran, a capture failure changes nothing.
+					}
+				}
+			}
+		})();
 		// Image bytes stay off `content` so truncation cannot chew them up
 		// and the model receives them as image parts, not a base64 blob.
 		const isVisual =

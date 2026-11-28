@@ -21,6 +21,21 @@ export interface TimelineEntryMeta {
 	 * them). Absent on checkpoints recorded before this field existed.
 	 */
 	turnId?: string;
+	/**
+	 * The prompt this entry is a rewind point for. Only prompt-level entries
+	 * carry it: they are recorded once per user turn instead of once per tool
+	 * call, so `/rewind` can list prompts without having to merge a turn's
+	 * many tool checkpoints together. Absent on tool-level entries.
+	 */
+	promptText?: string;
+	/**
+	 * A stable id on the first message this prompt added (the user message, or
+	 * the first MCP history message that preceded it). Compaction and history
+	 * trimming move `truncateToMessageIndex`, so the index alone can point at a
+	 * different prompt after they run; the id is resolved against the live
+	 * messages when the picker opens.
+	 */
+	messageId?: string;
 }
 
 export interface TimelineCaptureInput {
@@ -29,6 +44,10 @@ export interface TimelineCaptureInput {
 	title: string;
 	truncateToMessageIndex: number;
 	turnId?: string;
+	/** Makes this a `/rewind` point, and allows it to hold no files at all. */
+	promptText?: string;
+	/** Stable id of the prompt's first message, so a later rewind can find it after compaction. */
+	messageId?: string;
 	/** Relative paths → UTF-8 before-image, or `null` if the file did not exist (revert deletes it). */
 	files: Map<string, string | null>;
 }
@@ -47,6 +66,16 @@ export interface TimelineScanResult {
 export interface TimelineRevertResult {
 	revertedTo: TimelineEntryMeta;
 	filesRestored: string[];
+	/** Paths a restore could not write; the rest were still applied. */
+	filesFailed: string[];
+}
+
+/** What reverting to an entry would change, for the confirmation prompt. */
+export interface TimelineRevertPlan {
+	/** Files whose before-image will be written back. */
+	restore: string[];
+	/** Files the agent created, which will be deleted. */
+	remove: string[];
 }
 
 export interface TimelineIndex {

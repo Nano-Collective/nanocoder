@@ -51,6 +51,7 @@ import type {
 	RestoredInputDraft,
 	SubmittedInputDraft,
 } from '@/types/hooks';
+import {subscribeComposerPrefill} from '@/utils/composer-draft';
 import type {ActiveEditorState} from '@/vscode/vscode-server';
 
 // Prompt box width floor: keeps narrow terminals legible.
@@ -293,6 +294,17 @@ export default function UserInput({
 		images.replace,
 		updateMentionWarning,
 	]);
+
+	// A command (/rewind) hands a restored prompt back to the composer here, so
+	// it can be edited and sent again rather than replayed unread.
+	useEffect(() => {
+		return subscribeComposerPrefill(text => {
+			setInputState({displayValue: text, placeholderContent: {}});
+			promptHistory.resetIndex();
+			setTextInputKey(prev => prev + 1);
+			focus('user-input');
+		});
+	}, [setInputState, focus]);
 
 	// When in-flight work ends, reclaim focus so the cursor returns and the user
 	// can type right away. Focus can be dropped mid-turn (e.g. an interstitial

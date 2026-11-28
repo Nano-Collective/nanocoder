@@ -267,6 +267,9 @@ export function useChatHandler({
 			// would mint a second controller that the caller's abort checks never
 			// see.
 			turnController?: AbortController,
+			// The prompt's rewind id: shared by its timeline marker and every
+			// per-tool checkpoint it records.
+			rewindTurnId?: string,
 		) => {
 			if (!client) return;
 
@@ -306,6 +309,7 @@ export function useChatHandler({
 					privacyEnabled,
 					sessionId,
 					workingDirectory: process.cwd(),
+					turnId: rewindTurnId,
 					onToolExecuted,
 					onFinalAssistantText,
 					onPrivacyEvent: (count: number) => {
@@ -370,6 +374,20 @@ export function useChatHandler({
 			return;
 		}
 		const sessionId = ensureCurrentSessionId?.();
+		// Where this prompt starts in the message array: the index a `/rewind`
+		// slices back to. Preceding MCP history messages belong to this prompt,
+		// so they are dropped with it rather than left in the restored thread.
+		// `promptId` is the stable identity recorded alongside it, because
+		// compaction renumbers every index below.
+		const rewindIndex = messages.length;
+		const promptId = generateKey('prompt');
+		// The boundary is the first message this prompt adds. With MCP history
+		// messages that is the first of them, not the user message: rewinding
+		// to before the prompt has to remove the history it carried with it.
+		const rewindBoundaryId =
+			historyMessages && historyMessages.length > 0
+				? `${promptId}-start`
+				: promptId;
 		let wrotePlan = false;
 		let finalAssistantText = '';
 
@@ -451,16 +469,44 @@ export function useChatHandler({
 			);
 		}
 
+		// Record this prompt as a `/rewind` point before any of its tools can
+		// touch the workspace, so the snapshot describes what the user was
+		// looking at. Best-effort: a prompt whose snapshot failed simply has no
+		// rewind point, which must never stop the prompt itself.
+		if (sessionId) {
+			try {
+				const {getSessionTimeline, recordPromptStart} = await import(
+					'@/services/rewind'
+				);
+				const timeline = getSessionTimeline(sessionId);
+				if (timeline) {
+					await recordPromptStart({
+						timeline,
+						promptText: message,
+						messageIndex: rewindIndex,
+						turnId: promptId,
+						messageId: rewindBoundaryId,
+					});
+				}
+			} catch (error) {
+				getLogger().warn({error}, 'Failed to record the rewind point');
+			}
+		}
+
 		// Add user message to conversation history (single addition). Any
 		// caller-supplied historyMessages (e.g. the preceding turns of a
 		// multi-message MCP prompt) are spliced in first, preserving their
 		// original roles, so a few-shot prompt keeps its turn structure
 		// instead of being flattened into this one user message.
 		const builder = new MessageBuilder(messages);
-		for (const historyMessage of historyMessages ?? []) {
-			builder.addMessage(historyMessage);
+		for (const [index, historyMessage] of (historyMessages ?? []).entries()) {
+			builder.addMessage(
+				index === 0
+					? {...historyMessage, id: rewindBoundaryId}
+					: historyMessage,
+			);
 		}
-		builder.addUserMessage(messageWithContext, images);
+		builder.addUserMessage(messageWithContext, images, promptId);
 		const updatedMessages = builder.build();
 		setMessages(updatedMessages);
 
@@ -523,6 +569,7 @@ export function useChatHandler({
 				},
 				architectCheckpointState,
 				controller,
+				promptId,
 			);
 
 			if (

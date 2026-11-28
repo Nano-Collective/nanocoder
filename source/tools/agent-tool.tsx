@@ -7,6 +7,14 @@
  */
 
 import {randomUUID} from 'node:crypto';
+import {
+	beginTimelineCapture,
+	finishTimelineCapture,
+	type TimelineCaptureContext,
+} from '@/acp/acp-timeline.js';
+import {getToolManager} from '@/message-handler.js';
+import {getSessionTimeline} from '@/services/rewind.js';
+import type {TimelineManager} from '@/services/timeline-manager.js';
 import {buildSubagentFailureMessage} from '@/subagents/failure-message.js';
 import type {SubagentExecutor} from '@/subagents/subagent-executor.js';
 import {getSubagentLoader} from '@/subagents/subagent-loader.js';
@@ -68,6 +76,56 @@ function delegationContext(options?: ToolExecutionContext) {
 }
 
 /**
+ * A subagent runs its own tools directly, so none of them passes through
+ * `processToolUse` and records a per-tool checkpoint. The whole agent call is
+ * captured as opaque instead: a scan before and after sees every file the
+ * subagent changed.
+ */
+async function beginAgentCapture(
+	agentId: string,
+	args: AgentToolArgs,
+	options?: ToolExecutionContext,
+): Promise<{
+	timeline: TimelineManager;
+	capture: TimelineCaptureContext;
+} | null> {
+	if (!options?.turnId || !options.sessionId) return null;
+	try {
+		const timeline = getSessionTimeline(
+			options.sessionId,
+			options.workingDirectory,
+		);
+		const toolManager = options.toolManager ?? getToolManager();
+		if (!timeline || !toolManager) return null;
+		const capture = await beginTimelineCapture(
+			{timeline},
+			toolManager,
+			{
+				id: agentId,
+				function: {name: 'agent', arguments: {...args}},
+			},
+			options.timelineMessageIndex ?? 0,
+			'agent',
+			options.turnId,
+		);
+		return {timeline, capture};
+	} catch {
+		return null;
+	}
+}
+
+async function finishAgentCapture(
+	capture: {timeline: TimelineManager; capture: TimelineCaptureContext} | null,
+): Promise<void> {
+	if (!capture) return;
+	try {
+		await finishTimelineCapture({timeline: capture.timeline}, capture.capture);
+	} catch {
+		// A checkpoint is best-effort; the agent already ran.
+	}
+}
+
+/**
  * Start agent execution and return a promise with a unique agent ID.
  * Like executeBashCommand — starts immediately, doesn't block the caller.
  *
@@ -104,23 +162,28 @@ export function startAgentExecution(
 		error?: string;
 	}>(resolve => {
 		setTimeout(async () => {
-			const result = await executor.execute(
-				{
-					subagent_type,
-					description,
-					prompt,
-					context,
-				},
-				options?.abortSignal,
-				0,
-				agentId,
-				executionContext,
-			);
-			resolve({
-				content: result.output,
-				success: result.success,
-				error: result.error,
-			});
+			const capture = await beginAgentCapture(agentId, args, options);
+			try {
+				const result = await executor.execute(
+					{
+						subagent_type,
+						description,
+						prompt,
+						context,
+					},
+					options?.abortSignal,
+					0,
+					agentId,
+					executionContext,
+				);
+				resolve({
+					content: result.output,
+					success: result.success,
+					error: result.error,
+				});
+			} finally {
+				await finishAgentCapture(capture);
+			}
 		}, 0);
 	});
 
@@ -150,18 +213,25 @@ async function executeAgent(
 	}
 
 	const agentId = randomUUID();
-	const result = await executorInstance.execute(
-		{
-			subagent_type,
-			description,
-			prompt,
-			context,
-		},
-		options?.abortSignal,
-		0,
-		agentId,
-		delegationContext(options),
-	);
+	const capture = await beginAgentCapture(agentId, args, options);
+	const result = await (async () => {
+		try {
+			return await executorInstance.execute(
+				{
+					subagent_type,
+					description,
+					prompt,
+					context,
+				},
+				options?.abortSignal,
+				0,
+				agentId,
+				delegationContext(options),
+			);
+		} finally {
+			await finishAgentCapture(capture);
+		}
+	})();
 
 	if (!result.success) {
 		throw new Error(buildSubagentFailureMessage(result.error, result.output));

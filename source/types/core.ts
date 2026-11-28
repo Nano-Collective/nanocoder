@@ -31,6 +31,8 @@ export interface ImageAttachment {
 
 export interface Message {
 	role: 'user' | 'assistant' | 'system' | 'tool';
+	/** Stable id on a user message, so `/rewind` can find it after compaction. */
+	id?: string;
 	content: string;
 	tool_calls?: ToolCall[];
 	tool_call_id?: string;
@@ -139,6 +141,14 @@ export interface ToolExecutionContext {
 	toolManager?: ToolManager;
 	/** The call being executed, so a subagent it starts can name its parent call. */
 	toolCallId?: string;
+	/**
+	 * Set by the interactive loop for a prompt's turn. Its presence turns on
+	 * per-tool timeline capture, so `/rewind` can restore exactly the files the
+	 * agent touched instead of every file that was dirty.
+	 */
+	turnId?: string;
+	/** History length when the turn's tool calls started, for timeline meta. */
+	timelineMessageIndex?: number;
 	/** Set for a subagent's own tool calls: the run executing them. */
 	subagentRunId?: string;
 	/**

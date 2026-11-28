@@ -39,6 +39,7 @@ const CATEGORY_COMMANDS: Record<HelpCategory, readonly string[]> = {
 		'rename',
 		'resume',
 		'retry',
+		'rewind',
 		'share',
 		'tasks',
 	],

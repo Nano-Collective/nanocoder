@@ -1,3 +1,4 @@
+import type {TimelineManager} from '@/services/timeline-manager';
 import {
 	fileMutationPaths,
 	isFileMutatingTool,
@@ -7,7 +8,6 @@ import type {Message, ToolCall} from '@/types/core';
 import type {TimelineEntryMeta} from '@/types/timeline';
 import {formatError} from '@/utils/error-formatter';
 import {notifyWarning} from '@/utils/message-queue-core';
-import type {AcpSession} from './acp-session';
 
 /**
  * Tools that are not read-only but touch no workspace file, so there is
@@ -94,11 +94,21 @@ export type TimelineCaptureContext =
 	| DirectCaptureContext
 	| null;
 
+/**
+ * The parts of a session a capture needs. The ACP session qualifies, and so
+ * does the bare `{timeline}` the TUI passes: the timeline is the only state
+ * the capture reads.
+ */
+export interface TimelineCaptureSource {
+	timeline: TimelineManager;
+}
+
 export async function beginTimelineCapture(
-	session: AcpSession,
+	session: TimelineCaptureSource,
 	toolManager: ToolManager,
 	toolCall: ToolCall,
-	messages: Message[],
+	/** Messages to locate the tool call in, or the index directly. */
+	messagesOrIndex: Message[] | number,
 	title: string,
 	turnId?: string,
 ): Promise<TimelineCaptureContext> {
@@ -113,7 +123,10 @@ export async function beginTimelineCapture(
 		return null;
 	}
 
-	const truncateToMessageIndex = assistantToolCallIndex(messages);
+	const truncateToMessageIndex =
+		typeof messagesOrIndex === 'number'
+			? messagesOrIndex
+			: assistantToolCallIndex(messagesOrIndex);
 	const meta = {
 		toolCallId: toolCall.id,
 		toolName,
@@ -161,7 +174,7 @@ export async function beginTimelineCapture(
 }
 
 export async function finishTimelineCapture(
-	session: AcpSession,
+	session: TimelineCaptureSource,
 	context: TimelineCaptureContext,
 ): Promise<TimelineEntryMeta | null> {
 	if (!context || context.mode !== 'opaque') {
