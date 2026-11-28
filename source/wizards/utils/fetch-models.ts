@@ -30,6 +30,15 @@ export type ApiCompatibility =
 
 interface FetchModelsOptions {
 	timeoutMs?: number;
+	signal?: AbortSignal;
+	request?: (
+		url: string,
+		options: {
+			method: 'GET';
+			signal: AbortSignal;
+			headers: Record<string, string>;
+		},
+	) => Promise<Pick<Response, 'ok' | 'status' | 'statusText' | 'json'>>;
 }
 
 /**
@@ -45,7 +54,7 @@ export async function fetchModels(
 	apiKey?: string,
 	options: FetchModelsOptions = {},
 ): Promise<FetchModelsResult> {
-	const {timeoutMs = 5000} = options;
+	const {timeoutMs = 5000, signal, request = fetch} = options;
 
 	try {
 		let normalizedUrl = baseUrl.trim().replace(/\/$/, '');
@@ -93,9 +102,11 @@ export async function fetchModels(
 
 		let data: unknown;
 		try {
-			const response = await fetch(endpoint, {
+			const response = await request(endpoint, {
 				method: 'GET',
-				signal: controller.signal,
+				signal: signal
+					? AbortSignal.any([signal, controller.signal])
+					: controller.signal,
 				headers,
 			});
 

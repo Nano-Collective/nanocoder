@@ -4,7 +4,7 @@ import ModelSelector from '@/components/model-selector';
 import SessionSelector from '@/components/session-selector';
 import type {ActiveMode} from '@/hooks/useAppState';
 import type {CheckpointListItem, TuneConfig} from '@/types';
-import {ProviderWizard} from '@/wizards/provider-wizard';
+import {FirstRunProviderWizard} from '@/wizards/first-run-provider-wizard';
 import type {SettingsTabId} from './settings-constants';
 import {SettingsSelector} from './settings-selector';
 import {TuneSelector} from './tune-selector';
@@ -150,7 +150,7 @@ export function ModalSelectors({
 
 	if (activeMode === 'configWizard') {
 		return (
-			<ProviderWizard
+			<FirstRunProviderWizard
 				projectDir={process.cwd()}
 				onComplete={configPath => void onConfigWizardComplete(configPath)}
 				onCancel={onConfigWizardCancel}
