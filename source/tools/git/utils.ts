@@ -847,8 +847,12 @@ export async function getCommits(
 		if (!output.trim()) return [];
 
 		return output.split('\n').map(line => {
-			const [hash, shortHash, author, email, date, relativeDate, subject] =
+			// The subject is the last field and may itself contain `|`
+			// (`fix: handle a || b`), so everything after the sixth separator
+			// belongs to it.
+			const [hash, shortHash, author, email, date, relativeDate, ...rest] =
 				line.split('|');
+			const subject = rest.join('|');
 			return {
 				hash: hash || '',
 				shortHash: shortHash || '',
@@ -856,7 +860,7 @@ export async function getCommits(
 				email: email || '',
 				date: date || '',
 				relativeDate: relativeDate || '',
-				subject: subject || '',
+				subject,
 				body: '',
 			};
 		});

@@ -24,6 +24,7 @@ import {
 	execGit,
 	execGitBuffer,
 	execGitReadOnly,
+	getCommits,
 	isGitAvailable,
 	isGhAvailable,
 	resetBinaryAvailabilityCacheForTests,
@@ -342,6 +343,41 @@ test('execGit runs in the session project inside a session scope', async t => {
 			execGit(['rev-parse', '--show-toplevel']),
 		);
 		t.is(realpathSync(topLevel.trim()), dir);
+	} finally {
+		rmSync(dir, {recursive: true, force: true});
+	}
+});
+
+// The log format separates fields with `|`, which a commit subject may
+// contain too; the subject must come back whole.
+test('getCommits keeps a subject that contains the field separator', async t => {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), 'nanocoder-git-log-')));
+	const subject = 'fix: handle a || b and c | d';
+	try {
+		execSync('git init -q', {cwd: dir});
+		execFileSync(
+			'git',
+			[
+				'-c',
+				'user.name=Test',
+				'-c',
+				'user.email=test@example.com',
+				'-c',
+				'commit.gpgsign=false',
+				'commit',
+				'-q',
+				'--allow-empty',
+				'-m',
+				subject,
+			],
+			{cwd: dir},
+		);
+		const commits = await runInSessionContext(createSessionContext(dir), () =>
+			getCommits({count: 1}),
+		);
+		t.is(commits.length, 1);
+		t.is(commits[0]?.subject, subject);
+		t.is(commits[0]?.author, 'Test');
 	} finally {
 		rmSync(dir, {recursive: true, force: true});
 	}
