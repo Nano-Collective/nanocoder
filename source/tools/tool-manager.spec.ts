@@ -9,6 +9,7 @@ import {
 	filterValidToolCalls,
 	partitionUnknownToolCalls,
 } from '@/hooks/chat-handler/utils/tool-filters';
+import {jsonSchema} from '@/types/core';
 import {getShutdownManager} from '@/utils/shutdown';
 import {resolveToolApproval} from './approval-policy';
 import {describeSkippedMCPTools, ToolManager} from './tool-manager';
@@ -152,7 +153,7 @@ test('initializeMCP - calls onProgress callback for each server', async t => {
 	t.is(progressResults[0].serverName, 'test-server');
 });
 
-test('initializeMCP - unregisters tools when a server becomes unhealthy', async t => {
+test('initializeMCP - an unhealthy server keeps its tools offered', async t => {
 	let healthListener:
 		| ((change: {serverName: string; status: 'unhealthy'}) => void)
 		| undefined;
@@ -199,14 +200,18 @@ test('initializeMCP - unregisters tools when a server becomes unhealthy', async 
 	await manager.initializeMCP([
 		{name: 'health-server', transport: 'http', url: 'http://localhost/mcp'},
 	]);
-	t.true(manager.getToolNames().includes(toolName));
+	const offered = manager.getToolNames();
+	t.true(offered.includes(toolName));
 
 	healthListener?.({serverName: 'health-server', status: 'unhealthy'});
 
-	t.false(manager.getToolNames().includes(toolName));
+	// The list of tools the request carries is unchanged by the outage: that is
+	// what keeps the cached prefix usable (#1574). The tool is marked instead.
+	t.deepEqual(manager.getToolNames(), offered);
+	t.true(manager.isUnavailableMcpTool(toolName));
 });
 
-test('ToolManager re-registers MCP tools when server recovers to connected state', async t => {
+test('ToolManager keeps MCP tools registered across an outage and recovery', async t => {
 	let healthListener:
 		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
 		| undefined;
@@ -253,13 +258,24 @@ test('ToolManager re-registers MCP tools when server recovers to connected state
 	await manager.initializeMCP([
 		{name: 'health-server', transport: 'http', url: 'http://localhost/mcp'},
 	]);
-	t.true(manager.getToolNames().includes(toolName));
+	const offered = manager.getToolNames();
+	const entry = manager.getToolEntry(toolName);
+	t.true(offered.includes(toolName));
 
 	healthListener?.({serverName: 'health-server', status: 'unhealthy'});
-	t.false(manager.getToolNames().includes(toolName));
+	t.deepEqual(manager.getToolNames(), offered);
 
 	healthListener?.({serverName: 'health-server', status: 'connected'});
-	t.true(manager.getToolNames().includes(toolName));
+	// Nothing was removed, so recovery clears the mark and the tools the
+	// request carries are the same ones in the same order. The entry itself
+	// is refreshed from the server, which is how a changed read-only hint is
+	// picked up, and its schema is unchanged so the digest still applies.
+	t.deepEqual(manager.getToolNames(), offered);
+	t.is(
+		manager.getToolEntry(toolName)?.tool.inputSchema,
+		entry?.tool.inputSchema,
+	);
+	t.false(manager.isUnavailableMcpTool(toolName));
 });
 
 // ============================================================================
@@ -407,7 +423,7 @@ test('initializeMCP - skips an MCP tool named like a skill tool', async t => {
 	t.deepEqual(results[0].skippedTools, ['team_tool']);
 });
 
-test('an unhealthy MCP server removes only its own tools, not a built-in it shadowed', async t => {
+test('an unhealthy MCP server marks only its own tools, not a built-in it shadowed', async t => {
 	const {manager, servers, setHealth} = fakeMCPServer('fs', [
 		'list_directory',
 		'echo_tool',
@@ -417,8 +433,14 @@ test('an unhealthy MCP server removes only its own tools, not a built-in it shad
 
 	setHealth('unhealthy');
 
+	// The built-in is untouched, as before, and the server's own tool stays
+	// registered now (#1574) — marked unavailable rather than removed.
 	t.is(manager.getToolEntry('list_directory'), builtIn);
-	t.false(manager.hasTool('echo_tool'));
+	t.true(manager.hasTool('echo_tool'));
+	t.true(manager.isUnavailableMcpTool('echo_tool'));
+	// `list_directory` resolved to the built-in, so the outage must not reach
+	// it even though the same server offered that name.
+	t.false(manager.isUnavailableMcpTool('list_directory'));
 });
 
 test('an MCP server recovering to connected does not replace a built-in', async t => {
@@ -487,7 +509,7 @@ test('discovery mode: disconnectMCP removes a tool loaded on demand, not a built
 	t.is(manager.getToolEntry('list_directory'), builtIn);
 });
 
-test('discovery mode: an outage and recovery keep a built-in and restore the loaded MCP tool', async t => {
+test('discovery mode: an outage and recovery keep a built-in and never drop the loaded MCP tool', async t => {
 	const {manager, servers, setHealth} = fakeMCPServer('fs', [
 		'list_directory',
 		'echo_tool',
@@ -495,13 +517,22 @@ test('discovery mode: an outage and recovery keep a built-in and restore the loa
 	const builtIn = manager.getToolEntry('list_directory');
 	await manager.initializeMCP(servers, undefined, undefined, discovery);
 	t.true(manager.loadMcpTool('echo_tool'));
+	const loaded = manager.getToolEntry('echo_tool');
 
 	setHealth('unhealthy');
-	t.false(manager.hasTool('echo_tool'));
+	t.true(manager.hasTool('echo_tool'), 'the loaded schema stays in the request');
+	t.true(manager.isUnavailableMcpTool('echo_tool'));
 	t.is(manager.getToolEntry('list_directory'), builtIn);
 
 	setHealth('connected');
-	t.true(manager.hasTool('echo_tool'), 'the loaded schema comes back');
+	// The entry is refreshed from the recovered server, but its schema is
+	// unchanged and so is carried over — the digest the prefix tracker cached
+	// on it still describes the schema being sent.
+	t.is(
+		manager.getToolEntry('echo_tool')?.tool.inputSchema,
+		loaded?.tool.inputSchema,
+	);
+	t.false(manager.isUnavailableMcpTool('echo_tool'));
 	t.false(manager.getMcpCatalog().has('list_directory'));
 	t.is(manager.getToolEntry('list_directory'), builtIn);
 });
@@ -2087,76 +2118,148 @@ test('ToolManager on-demand discovery obeys tuneConfig.mcpDiscovery === "disable
  * A ten-tool server whose health listener the test drives. Ten tools puts
  * initializeMCP in discovery mode by default.
  */
+/**
+ * A fake MCP client that reproduces the real outage lifecycle, which is the
+ * part that matters for #1574:
+ *
+ * - `markUnhealthy` announces the status change and *then* calls
+ *   `clearCatalog`, which empties that server's tool list. So the listener
+ *   still sees the mapping, and everything after it does not — a tool that
+ *   stays registered through the outage has no owner in the live mapping.
+ * - recovery goes the other way: `restoreServerHealth` re-lists the tools
+ *   first and only then announces `connected`.
+ *
+ * A fixture that kept the mapping up through an outage would let a manager
+ * that cannot identify a retained tool pass.
+ */
 function outageFixture() {
 	let healthListener:
 		| ((change: {serverName: string; status: 'unhealthy' | 'connected'}) => void)
 		| undefined;
-	const mockTools: any[] = [];
-	for (let i = 1; i <= 10; i++) {
-		mockTools.push({
-			name: `mcp_tool_${i}`,
+	const makeRecord = (name: string, label: string) => {
+		const raw = {type: 'object', properties: {}};
+		return {
+			name,
+			// The raw schema is what the client catalogues; the wrapper is what
+			// the registered entry carries, exactly as in production.
+			raw,
 			tool: {
-				description: `MCP Tool ${i}`,
-				parameters: {type: 'object'},
-				execute: async () => `result ${i}`,
+				description: label,
+				inputSchema: jsonSchema(raw),
+				execute: async () => label,
 			},
-			handler: async () => `result ${i}`,
+			handler: async () => label,
 			approval: true,
-		});
+			readOnly: false,
+		};
+	};
+	// What the server offers.
+	const offered: any[] = [];
+	for (let i = 1; i <= 10; i++) {
+		offered.push(makeRecord(`mcp_tool_${i}`, `MCP Tool ${i}`));
 	}
+	// What the client has listed from it: emptied by the outage, re-listed on
+	// recovery.
+	let listed: any[] = [];
+	const find = (name: string) => {
+		const record = offered.find(entry => entry.name === name);
+		if (!record) throw new Error(`no such tool in fixture: ${name}`);
+		return record;
+	};
+	const asMcpTool = (entry: any) => ({
+		name: entry.name,
+		serverName: 'flaky-server',
+		description: entry.tool.description,
+		readOnly: entry.readOnly,
+		inputSchema: entry.raw,
+	});
 	const fakeClient = {
 		onHealthChange(listener: typeof healthListener) {
 			healthListener = listener;
 			return () => {};
 		},
 		async connectToServers() {
-			return [{serverName: 'flaky-server', success: true, toolCount: 10}];
+			listed = [...offered];
+			return [
+				{serverName: 'flaky-server', success: true, toolCount: listed.length},
+			];
 		},
 		getToolNameConflicts: () => [],
-		getToolEntries: () => mockTools,
+		getToolEntries: () => listed,
+		getServerTools: () => listed.map(asMcpTool),
+		getAllDiscoveredTools: () => listed.map(asMcpTool),
 		getToolMapping: () =>
 			new Map(
-				mockTools.map(t => [
-					t.name,
-					{serverName: 'flaky-server', originalName: t.name, readOnly: false},
+				listed.map(entry => [
+					entry.name,
+					{
+						serverName: 'flaky-server',
+						originalName: entry.name,
+						readOnly: entry.readOnly,
+					},
 				]),
 			),
 		getNativeToolsRegistry: () =>
-			Object.fromEntries(mockTools.map(t => [t.name, t.tool])),
+			Object.fromEntries(listed.map(entry => [entry.name, entry.tool])),
 		disconnect: async () => {},
 	};
 	const manager = new HealthSeamToolManager(fakeClient);
 	return {
 		manager,
-		emit: (status: 'unhealthy' | 'connected') =>
-			healthListener?.({serverName: 'flaky-server', status}),
+		emit: (status: 'unhealthy' | 'connected') => {
+			if (status === 'unhealthy') {
+				healthListener?.({serverName: 'flaky-server', status});
+				listed = [];
+				return;
+			}
+			listed = [...offered];
+			healthListener?.({serverName: 'flaky-server', status});
+		},
+		// Lets a test have the server come back offering something new.
+		addTool: (name: string) => offered.push(makeRecord(name, name)),
+		// ...or come back having changed its mind about a tool it already had.
+		setReadOnly: (name: string, readOnly: boolean) => {
+			const record = find(name);
+			record.readOnly = readOnly;
+			record.approval = !readOnly;
+		},
+		setSchema: (name: string, raw: Record<string, unknown>) => {
+			const record = find(name);
+			record.raw = raw as typeof record.raw;
+			record.tool = {...record.tool, inputSchema: jsonSchema(raw)};
+		},
+		schemaOf: (name: string) => find(name).tool.inputSchema,
+		rawSchemaOf: (name: string) => find(name).raw,
 	};
 }
 
 const mcpToolNames = (manager: ToolManager) =>
 	manager.getToolNames().filter(name => name.startsWith('mcp_tool_'));
 
-test('discovery mode: a recovered server goes back to the catalog, not every schema', async t => {
+test('discovery mode: an outage leaves the catalog and the loaded schema alone', async t => {
 	const {manager, emit} = outageFixture();
 	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
 	t.true(manager.hasTool('load_tool_schema'));
 	t.true(manager.loadMcpTool('mcp_tool_1'));
 	t.deepEqual(mcpToolNames(manager), ['mcp_tool_1']);
+	const sectionBefore = manager.getMcpCatalog().formatCatalogSection();
 
 	emit('unhealthy');
-	t.deepEqual(mcpToolNames(manager), []);
-	t.is(manager.getMcpCatalog().size, 0);
+	// Both halves of the prefix hold: the schema array keeps the loaded tool,
+	// and the catalog section the system prompt carries is byte-identical to
+	// what it was before the outage (#1574).
+	t.deepEqual(mcpToolNames(manager), ['mcp_tool_1']);
+	t.is(manager.getMcpCatalog().size, 10);
+	t.is(manager.getMcpCatalog().formatCatalogSection(), sectionBefore);
+	t.true(manager.isUnavailableMcpTool('mcp_tool_1'));
 
 	emit('connected');
-	t.deepEqual(
-		mcpToolNames(manager),
-		['mcp_tool_1'],
-		'only the schema the model had loaded comes back',
-	);
+	t.deepEqual(mcpToolNames(manager), ['mcp_tool_1']);
 	const catalog = manager.getMcpCatalog();
-	t.is(catalog.size, 10, 'the server is listed in the catalog again');
+	t.is(catalog.size, 10);
 	t.is(catalog.getUnloaded().length, 9);
 	t.true(catalog.isLoaded('mcp_tool_1'));
+	t.false(manager.isUnavailableMcpTool('mcp_tool_1'));
 
 	// The rest still load on demand.
 	t.true(manager.loadMcpTool('mcp_tool_2'));
@@ -2179,6 +2282,55 @@ test('without discovery a recovered server registers every tool and refills the 
 	t.is(mcpToolNames(manager).length, 10);
 	t.is(manager.getMcpCatalog().size, 10);
 	t.is(manager.getMcpCatalog().getUnloaded().length, 0);
+	await manager.disconnectMCP();
+});
+
+test('without discovery a server that reconnects with a new tool registers just that tool', async t => {
+	const {manager, emit, addTool} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+	const before = manager.getToolEntry('mcp_tool_1');
+
+	emit('unhealthy');
+	addTool('mcp_tool_11');
+	emit('connected');
+
+	// The ten it already had keep their place. The entry is rebuilt from what
+	// the server now reports, so a changed read-only hint cannot be missed,
+	// but an unchanged schema object is carried over — the digest the prefix
+	// tracker cached on it still describes the schema being sent.
+	t.not(manager.getToolEntry('mcp_tool_1'), before);
+	t.is(
+		manager.getToolEntry('mcp_tool_1')?.tool.inputSchema,
+		before?.tool.inputSchema,
+	);
+	// The new one is picked up: a server gaining a tool is real new
+	// information, and this is the one case where the prefix has to move.
+	t.true(manager.hasTool('mcp_tool_11'));
+	t.is(mcpToolNames(manager).length, 11);
+	await manager.disconnectMCP();
+});
+
+test('discovery mode: a tool gained during an outage is catalogued, not registered', async t => {
+	const {manager, emit, addTool} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+
+	emit('unhealthy');
+	addTool('mcp_tool_11');
+	emit('connected');
+
+	// Under discovery a new tool joins the catalog unloaded, exactly as it
+	// would have at startup — it does not quietly add a schema to the request.
+	t.false(manager.hasTool('mcp_tool_11'));
+	t.true(manager.getMcpCatalog().has('mcp_tool_11'));
+	t.false(manager.getMcpCatalog().isLoaded('mcp_tool_11'));
+	t.deepEqual(mcpToolNames(manager), ['mcp_tool_1']);
+	t.true(manager.loadMcpTool('mcp_tool_11'), 'and can still be loaded on demand');
 	await manager.disconnectMCP();
 });
 
@@ -2267,3 +2419,275 @@ test('isReadOnly ignores the readOnlyHint of an unloaded on-demand MCP tool', as
 	t.true(manager.isReadOnly('read_file'), 'built-in readers are unaffected');
 	await manager.disconnectMCP();
 });
+
+// ============================================================================
+// What the change is for: the prefix tracker's verdict across an MCP outage.
+// ============================================================================
+
+import {
+	comparePromptFingerprints,
+	fingerprintPrompt,
+} from '@/ai-sdk-client/chat/prefix-tracker';
+
+// ============================================================================
+// The client empties an unhealthy server's catalog (#1574)
+// ============================================================================
+
+test('a retained tool is still known to be its server\'s after the catalog is cleared', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+
+	emit('unhealthy');
+
+	// The live mapping is empty now: it is rebuilt from the server's tool
+	// list, and marking the server unhealthy empties that list. Keeping the
+	// tools registered is only safe while they can still be identified —
+	// otherwise they read as built-ins, and a call to one is attempted
+	// against a dead transport instead of being refused.
+	t.deepEqual(manager.getMCPToolInfo('mcp_tool_1'), {
+		isMCPTool: true,
+		serverName: 'flaky-server',
+	});
+	t.true(manager.isUnavailableMcpTool('mcp_tool_1'));
+	t.is(mcpToolNames(manager).length, 10, 'and all of them are still offered');
+
+	emit('connected');
+	t.false(manager.isUnavailableMcpTool('mcp_tool_1'));
+	await manager.disconnectMCP();
+});
+
+test('discovery mode: a cleared catalog still identifies loaded and unloaded tools', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	t.true(manager.loadMcpTool('mcp_tool_1'));
+
+	emit('unhealthy');
+
+	// Both halves have to survive the clear: the loaded one so a call to it is
+	// refused with a reason, the unloaded one so load_tool_schema refuses to
+	// hydrate a schema from a server that cannot answer.
+	t.true(manager.isUnavailableMcpTool('mcp_tool_1'), 'loaded');
+	t.true(manager.isUnavailableMcpTool('mcp_tool_4'), 'catalogued, unloaded');
+	t.false(manager.loadMcpTool('mcp_tool_4'));
+	t.false(manager.hasTool('mcp_tool_4'));
+	await manager.disconnectMCP();
+});
+
+// ============================================================================
+// What a recovered server has changed about its tools (#1574)
+// ============================================================================
+
+test('a tool that comes back mutating is no longer treated as read-only', async t => {
+	const {manager, emit, setReadOnly} = outageFixture();
+	setReadOnly('mcp_tool_1', true);
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+	t.true(manager.isReadOnly('mcp_tool_1'));
+
+	emit('unhealthy');
+	// The server comes back having made the tool mutating.
+	setReadOnly('mcp_tool_1', false);
+	emit('connected');
+
+	// Keeping the pre-outage entry would leave this annotated read-only, and a
+	// read-only MCP tool runs unattended in auto-accept mode — so the stale
+	// annotation is the difference between a prompt and a silent write.
+	t.false(manager.isReadOnly('mcp_tool_1'));
+	t.is(manager.getToolEntry('mcp_tool_1')?.approval, true);
+	t.false(manager.getMcpCatalog().get('mcp_tool_1')?.readOnly);
+	await manager.disconnectMCP();
+});
+
+test('a recovered tool keeps an unchanged schema object and takes on a changed one', async t => {
+	const {manager, emit, setSchema, schemaOf, rawSchemaOf} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+	const before = manager.getToolEntry('mcp_tool_1')?.tool.inputSchema;
+	t.truthy(before);
+
+	emit('unhealthy');
+	emit('connected');
+	// Nothing changed, so the entry keeps the schema object the request was
+	// already fingerprinted against, and the prefix tracker's digest cache,
+	// which keys on that identity, survives the recovery.
+	t.is(manager.getToolEntry('mcp_tool_1')?.tool.inputSchema, before);
+
+	emit('unhealthy');
+	setSchema('mcp_tool_1', {
+		type: 'object',
+		properties: {path: {type: 'string'}},
+		required: ['path'],
+	});
+	emit('connected');
+
+	// A schema that genuinely changed has to be sent: the model is being
+	// offered different parameters, and a stale one would have it call the
+	// tool wrongly for as long as the session lasts.
+	t.is(
+		manager.getToolEntry('mcp_tool_1')?.tool.inputSchema,
+		schemaOf('mcp_tool_1'),
+	);
+	t.not(manager.getToolEntry('mcp_tool_1')?.tool.inputSchema, before);
+	t.deepEqual(
+		manager.getMcpCatalog().get('mcp_tool_1')?.inputSchema,
+		rawSchemaOf('mcp_tool_1'),
+		'and the catalog serves the new schema to load_tool_schema',
+	);
+	await manager.disconnectMCP();
+});
+
+test('only a schema the server actually changed moves the tools hash', async t => {
+	const {manager, emit, setSchema} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+	const hash = async () => {
+		const names = manager.getAvailableToolNames(undefined, 'normal', []);
+		const print = await fingerprintPrompt(
+			'system prompt',
+			manager.getFilteredTools(names),
+			[],
+		);
+		return print.toolsHash;
+	};
+
+	const before = await hash();
+	emit('unhealthy');
+	emit('connected');
+	t.is(await hash(), before, 'an ordinary recovery changes nothing');
+
+	emit('unhealthy');
+	setSchema('mcp_tool_1', {type: 'object', properties: {q: {type: 'string'}}});
+	emit('connected');
+	t.not(await hash(), before, 'a changed schema is a real change');
+	await manager.disconnectMCP();
+});
+
+test('an MCP outage leaves the request append-only, not tools-changed', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP(
+		[{name: 'flaky-server', transport: 'stdio'}],
+		undefined,
+		undefined,
+		{mcpDiscovery: 'disabled'},
+	);
+
+	const snapshot = async () => {
+		const names = manager.getAvailableToolNames(undefined, 'normal', []);
+		return fingerprintPrompt('system prompt', manager.getFilteredTools(names), [
+			{role: 'user', content: 'first turn'},
+		]);
+	};
+
+	const before = await snapshot();
+	emit('unhealthy');
+	const during = await snapshot();
+	emit('connected');
+	const after = await snapshot();
+
+	// This is the whole point of the change. Before it, the outage reported
+	// `tools-changed` with ten removals, which costs the entire prefill on
+	// every turn until the server returns — and another one when it does.
+	t.deepEqual(comparePromptFingerprints(before, during), {
+		kind: 'append-only',
+		reusedMessages: 1,
+	});
+	t.deepEqual(comparePromptFingerprints(during, after), {
+		kind: 'append-only',
+		reusedMessages: 1,
+	});
+	t.is(before.toolsHash, after.toolsHash);
+	await manager.disconnectMCP();
+});
+
+test('the tools hash does not depend on the order servers connected in', async t => {
+	// Two sessions, same two servers, opposite connection order — which is
+	// what parallel connection actually produces.
+	const hashFor = async (toolsByServer: Record<string, string[]>) => {
+		const {manager, servers} = fakeMCPServers(toolsByServer);
+		await manager.initializeMCP(servers, undefined, undefined, {
+			mcpDiscovery: 'disabled',
+		});
+		const names = manager.getAvailableToolNames(undefined, 'normal', []);
+		const print = await fingerprintPrompt(
+			'system prompt',
+			manager.getFilteredTools(names),
+			[{role: 'user', content: 'first turn'}],
+		);
+		await manager.disconnectMCP();
+		return print;
+	};
+
+	const first = await hashFor({alpha: ['a_one', 'a_two'], beta: ['b_one']});
+	const second = await hashFor({beta: ['b_one'], alpha: ['a_two', 'a_one']});
+
+	t.deepEqual(first.toolNames, second.toolNames);
+	t.is(first.toolsHash, second.toolsHash);
+	t.deepEqual(comparePromptFingerprints(first, second), {
+		kind: 'append-only',
+		reusedMessages: 1,
+	});
+});
+
+test('discovery mode: a tool from a down server cannot be hydrated during the outage', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+	const offered = manager.getToolNames();
+
+	emit('unhealthy');
+
+	// The catalog still lists it — that is what keeps the prompt's catalog
+	// section stable — so the model can still ask for its schema. Loading it
+	// would add a schema to the request mid-outage, which is the prefix change
+	// keeping the tools registered just avoided, for a tool that cannot answer.
+	t.true(manager.getMcpCatalog().has('mcp_tool_4'));
+	t.false(manager.loadMcpTool('mcp_tool_4'));
+	t.false(manager.hasTool('mcp_tool_4'));
+	t.deepEqual(manager.getToolNames(), offered);
+
+	// getToolHandler auto-hydrates an unloaded catalog tool, so it must refuse
+	// here too rather than going around loadMcpTool's guard.
+	t.is(manager.getToolHandler('mcp_tool_4'), undefined);
+	t.deepEqual(manager.getToolNames(), offered);
+
+	emit('connected');
+	t.true(manager.loadMcpTool('mcp_tool_4'), 'and loads once the server is back');
+	t.true(manager.hasTool('mcp_tool_4'));
+	await manager.disconnectMCP();
+});
+
+test('load_tool_schema says why it cannot load a tool from a down server', async t => {
+	const {manager, emit} = outageFixture();
+	await manager.initializeMCP([{name: 'flaky-server', transport: 'stdio'}]);
+
+	emit('unhealthy');
+	const message = await executeLoadToolSchema(
+		{tool_name: 'mcp_tool_4'},
+		manager,
+	);
+
+	// Names the server and says not to expect it yet, instead of the bare
+	// "Failed to hydrate schema" the generic path would return.
+	t.true(message.includes('flaky-server'), message);
+	t.true(message.includes('unreachable'), message);
+	t.false(message.includes('Successfully loaded'), message);
+	await manager.disconnectMCP();
+});
+
+import {executeLoadToolSchema} from './mcp/load-tool-schema';

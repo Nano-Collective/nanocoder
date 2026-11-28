@@ -10,6 +10,9 @@ import type {ToolCall, ToolResult} from '@/types/core';
  * - Tools that don't exist in the tool manager
  * - On-demand MCP tools whose schema hasn't been loaded (the result tells the
  *   model to call `load_tool_schema` first)
+ * - Tools whose MCP server is currently unhealthy. Their schemas stay in the
+ *   request so the cached prefix survives the outage (#1574), so the call is
+ *   refused here instead of vanishing from the tool list
  * - Tools that exist but were not offered to the model this turn (hidden by the
  *   mode, tune profile or disabled list). The offered list only narrows what
  *   the model sees; without this check a model that names a hidden tool anyway
@@ -90,6 +93,22 @@ const partitionToolCalls = (
 		if (toolManager && !toolManager.hasTool(toolCall.function.name)) {
 			rejectedToolCalls.push(toolCall);
 			errorResults.push(describeUnknown(toolCall));
+			continue;
+		}
+
+		// The tool is registered and was offered, but its server is down. The
+		// schema deliberately stays in the request through an outage (#1574),
+		// so this is where the call is stopped — before approval, so the user
+		// is not asked to approve something that cannot run.
+		if (toolManager?.isUnavailableMcpTool?.(toolCall.function.name)) {
+			rejectedToolCalls.push(toolCall);
+			errorResults.push({
+				tool_call_id: toolCall.id,
+				role: 'tool' as const,
+				name: toolCall.function.name,
+				content: `The tool "${toolCall.function.name}" belongs to an MCP server that is currently unreachable. It is reconnecting; do not retry this tool on this turn. Use another tool or tell the user it is unavailable.`,
+				isError: true,
+			});
 			continue;
 		}
 

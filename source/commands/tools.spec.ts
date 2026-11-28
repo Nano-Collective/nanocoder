@@ -10,6 +10,7 @@ interface MockConfig {
 	customTools?: Record<string, {source: 'personal' | 'project'}>;
 	ownerSkills?: Record<string, string>;
 	mcpTools?: Record<string, string>;
+	unavailableMcpTools?: string[];
 }
 
 function createMockToolManager(config: MockConfig): ToolManager {
@@ -26,6 +27,8 @@ function createMockToolManager(config: MockConfig): ToolManager {
 			config.mcpTools && name in config.mcpTools
 				? {isMCPTool: true, serverName: config.mcpTools[name]}
 				: {isMCPTool: false},
+		isUnavailableMcpTool: (name: string) =>
+			config.unavailableMcpTools?.includes(name) ?? false,
 	} as unknown as ToolManager;
 }
 
@@ -93,8 +96,33 @@ test.serial('groupTools - MCP tools land in mcp group with server name', t => {
 	const r = groupTools(tm);
 
 	t.is(r.mcp.length, 1);
-	t.deepEqual(r.mcp[0], {name: 'my_mcp_tool', server: 'my-server'});
+	t.deepEqual(r.mcp[0], {
+		name: 'my_mcp_tool',
+		server: 'my-server',
+		unavailable: false,
+	});
 });
+
+test.serial(
+	'groupTools - a tool whose MCP server is unhealthy is still listed, marked unavailable',
+	t => {
+		// Tools stay registered through an outage so the request's tool schemas
+		// are not rewritten (#1574). /tools therefore has to say the tool cannot
+		// be used, rather than listing it as though the server were fine.
+		const tm = createMockToolManager({
+			toolNames: ['reachable_tool', 'dead_tool'],
+			mcpTools: {reachable_tool: 'up-server', dead_tool: 'down-server'},
+			unavailableMcpTools: ['dead_tool'],
+		});
+		const r = groupTools(tm);
+
+		t.is(r.mcp.length, 2);
+		t.true(r.mcp.some(x => x.name === 'dead_tool' && x.unavailable === true));
+		t.true(
+			r.mcp.some(x => x.name === 'reachable_tool' && x.unavailable === false),
+		);
+	},
+);
 
 test.serial(
 	'groupTools - bundle tool whose owner skill is missing falls back to project source',

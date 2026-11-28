@@ -20,6 +20,25 @@ export function sanitizeCatalogText(text: string): string {
 }
 
 /**
+ * Whether a recovered server's account of a tool differs from the stored
+ * one. The schema is compared by serialization: both sides are parsed from
+ * the server's own JSON, so an unchanged schema stringifies identically, and
+ * a false "changed" only costs one rewrite.
+ */
+function hasChanged(
+	stored: MCPToolCatalogEntry,
+	fresh: MCPToolCatalogEntry,
+): boolean {
+	return (
+		stored.serverName !== fresh.serverName ||
+		stored.description !== fresh.description ||
+		stored.readOnly !== fresh.readOnly ||
+		stored.isLoaded !== fresh.isLoaded ||
+		JSON.stringify(stored.inputSchema) !== JSON.stringify(fresh.inputSchema)
+	);
+}
+
+/**
  * Manages an index of available MCP tools for on-demand lazy discovery.
  * Prevents hydrating large JSON schemas into the prompt up-front.
  * Supports layering over a parent catalog for ACP sessions so a session's
@@ -33,23 +52,54 @@ export class MCPToolCatalog {
 		this.parent = parent;
 	}
 
+	/** Sanitized catalog record for a tool, without storing it. */
+	private normalize(
+		serverName: string,
+		tool: MCPTool,
+		isLoaded: boolean,
+	): MCPToolCatalogEntry {
+		return {
+			name: tool.name.replace(/[\s`]+/g, '').trim(),
+			serverName: serverName.replace(/[\s`]+/g, '').trim(),
+			description: sanitizeCatalogText(
+				tool.description?.trim() || 'No description provided',
+			),
+			readOnly: tool.readOnly === true,
+			isLoaded,
+			inputSchema: tool.inputSchema,
+		};
+	}
+
 	/**
 	 * Registers an MCP tool into the catalog.
 	 */
 	add(serverName: string, tool: MCPTool, isLoaded = false): void {
-		const name = tool.name.replace(/[\s`]+/g, '').trim();
-		const description = sanitizeCatalogText(
-			tool.description?.trim() || 'No description provided',
+		const entry = this.normalize(serverName, tool, isLoaded);
+		this.entries.set(entry.name, entry);
+	}
+
+	/**
+	 * Updates an entry from a recovered server's own account of a tool,
+	 * keeping whether it is loaded unless told otherwise. Returns whether
+	 * anything actually changed.
+	 *
+	 * Unloaded entries render into the system prompt, so an entry that has
+	 * not changed has to be left exactly as it was, or a server reconnecting
+	 * costs every later turn its cached prefix for nothing (#1574). An entry
+	 * that *has* changed must be written even at that price:
+	 * `load_tool_schema` hands the model this stored schema, and a read-only
+	 * badge the server no longer agrees with is worse than a broken prefix.
+	 */
+	refresh(serverName: string, tool: MCPTool, isLoaded?: boolean): boolean {
+		const existing = this.get(tool.name.replace(/[\s`]+/g, '').trim());
+		const next = this.normalize(
+			serverName,
+			tool,
+			isLoaded ?? existing?.isLoaded ?? false,
 		);
-		const cleanServerName = serverName.replace(/[\s`]+/g, '').trim();
-		this.entries.set(name, {
-			name,
-			serverName: cleanServerName,
-			description,
-			readOnly: tool.readOnly === true,
-			isLoaded,
-			inputSchema: tool.inputSchema,
-		});
+		if (existing && !hasChanged(existing, next)) return false;
+		this.entries.set(next.name, next);
+		return true;
 	}
 
 	/**
@@ -120,20 +170,6 @@ export class MCPToolCatalog {
 			return true;
 		}
 		return false;
-	}
-
-	/**
-	 * Removes all tools belonging to a specific server in this catalog layer.
-	 */
-	removeServerTools(serverName: string): string[] {
-		const removed: string[] = [];
-		for (const [name, entry] of this.entries.entries()) {
-			if (entry.serverName === serverName) {
-				this.entries.delete(name);
-				removed.push(name);
-			}
-		}
-		return removed;
 	}
 
 	/**

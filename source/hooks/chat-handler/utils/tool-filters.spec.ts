@@ -411,3 +411,75 @@ test('buildAbandonedTurnMessages - a clean turn produces no abandoned results', 
 	t.is(emittedToolCalls.length, 1);
 	t.is(resultsForAbandonedTurn.length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// An MCP server that has gone unhealthy keeps its tools in the request, so the
+// cached prefix survives the outage (#1574). The call is refused here instead.
+// ---------------------------------------------------------------------------
+
+test('filterValidToolCalls - refuses a call to a tool whose MCP server is down', t => {
+	const mockToolManager = {
+		hasTool: () => true,
+		getToolNames: () => ['read_file', 'flaky_fetch'],
+		isUnavailableMcpTool: (name: string) => name === 'flaky_fetch',
+	} as unknown as ToolManager;
+
+	const {validToolCalls, errorResults} = filterValidToolCalls(
+		[
+			{id: 'call_1', function: {name: 'flaky_fetch', arguments: {}}},
+			{id: 'call_2', function: {name: 'read_file', arguments: {}}},
+		],
+		mockToolManager,
+	);
+
+	// The healthy call still runs: one server being down must not stop the turn.
+	t.deepEqual(
+		validToolCalls.map(call => call.id),
+		['call_2'],
+	);
+	t.is(errorResults.length, 1);
+	t.is(errorResults[0].tool_call_id, 'call_1');
+	t.true(errorResults[0].isError);
+	t.true(errorResults[0].content.includes('unreachable'));
+	// Says not to retry this turn, or a model that reads "reconnecting" as
+	// "try again" burns the turn on a tool that cannot answer yet.
+	t.true(errorResults[0].content.includes('do not retry'));
+});
+
+test('filterValidToolCalls - the refused call is reported so its result is not orphaned', t => {
+	const mockToolManager = {
+		hasTool: () => true,
+		getToolNames: () => ['flaky_fetch'],
+		isUnavailableMcpTool: () => true,
+	} as unknown as ToolManager;
+
+	const {rejectedToolCalls, errorResults} = partitionUnknownToolCalls(
+		[{id: 'call_1', function: {name: 'flaky_fetch', arguments: {}}}],
+		mockToolManager,
+	);
+
+	// A result whose call is missing from history is dropped before it reaches
+	// the model, so the refusal has to come back paired with its call.
+	t.deepEqual(
+		rejectedToolCalls.map(call => call.id),
+		['call_1'],
+	);
+	t.is(errorResults.length, 1);
+	t.is(errorResults[0].tool_call_id, 'call_1');
+});
+
+test('filterValidToolCalls - a manager without the predicate still works', t => {
+	// Subagents and older call sites pass a manager that predates this check.
+	const mockToolManager = {
+		hasTool: () => true,
+		getToolNames: () => ['read_file'],
+	} as unknown as ToolManager;
+
+	const {validToolCalls, errorResults} = filterValidToolCalls(
+		[{id: 'call_1', function: {name: 'read_file', arguments: {}}}],
+		mockToolManager,
+	);
+
+	t.is(validToolCalls.length, 1);
+	t.is(errorResults.length, 0);
+});
