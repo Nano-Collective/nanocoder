@@ -26,6 +26,7 @@ import {
 	hasSeenFile,
 	hasVisibleLines,
 	markFileSeen,
+	matchesFileSnapshot,
 	recordEditVisibility,
 	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
@@ -120,6 +121,8 @@ const executeStringReplace = async (
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const hadMatchingSnapshot =
+		matchesFileSnapshot(absPath, fileContent) === true;
 	const {oldStr: old_str, newStr: new_str} = fitEditToLineEndings(
 		fileContent,
 		args.old_str,
@@ -190,7 +193,7 @@ const executeStringReplace = async (
 	// rest of what the agent had read forward instead of forgetting it.
 	try {
 		const stats = await lstat(absPath);
-		rememberFileSnapshot(absPath, newContent);
+		if (hadMatchingSnapshot) rememberFileSnapshot(absPath, newContent);
 		const editStart = fileContent
 			.slice(0, fileContent.indexOf(old_str))
 			.split('\n').length;

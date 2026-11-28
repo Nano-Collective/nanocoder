@@ -27,6 +27,7 @@ import {
 	hasSeenFile,
 	hasVisibleLines,
 	markFileSeen,
+	matchesFileSnapshot,
 	recordEditVisibility,
 	rememberFileSnapshot,
 } from '@/tools/runtime/read-tracker';
@@ -295,6 +296,8 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const hadMatchingSnapshot =
+		matchesFileSnapshot(absPath, fileContent) === true;
 
 	const newContent = validateBlocks(fileContent, blocks, path);
 
@@ -342,7 +345,7 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	// are applied in order, so positions follow the evolving content.
 	try {
 		const stats = await lstat(absPath);
-		rememberFileSnapshot(absPath, newContent);
+		if (hadMatchingSnapshot) rememberFileSnapshot(absPath, newContent);
 		let working = fileContent;
 		for (const block of blocks) {
 			const blockLines = getLineNumbersForText(working, block.search);

@@ -18,6 +18,7 @@ import {
 } from '../../services/session-cwd.js';
 import type {DevelopmentMode} from '../../types/core.js';
 import {resolveToolApproval} from '../approval-policy.js';
+import {withValidation} from '../runtime/tool-validation.js';
 import {fileOpTool} from './file-op.js';
 import {readFileTool} from '../read-file.js';
 import {writeFileTool} from './write-file.js';
@@ -209,38 +210,60 @@ const runReadFile = (path: string): Promise<unknown> =>
 	// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
 	(readFileTool.tool as any).execute({path}, {toolCallId: 'test', messages: []});
 
-test.serial('file_op delete clears stale read and snapshot state for the deleted path', async t => {
+const runValidatedWrite = withValidation(
+	input =>
+		// biome-ignore lint/suspicious/noExplicitAny: Tool internals require any
+		(writeFileTool.tool as any).execute(input, {toolCallId: 'test', messages: []}),
+	writeFileTool.validator,
+);
+
+test.serial('file_op delete makes write_file reject recreation once before allowing a retry', async t => {
 	const absPath = join(workspace, 'greet.py');
 	setProjectRoot(workspace);
 	await runReadFile('greet.py');
 	t.true(hasSeenFile(absPath));
 	t.true(hasFileSnapshot(absPath));
+	t.true((await writeFileTool.validator!({path: 'greet.py', content: 'new\n'})).valid);
 
 	await runFileOp({operation: 'delete', path: 'greet.py'});
 
+	t.true(hasSeenFile(absPath));
+	t.true(hasFileSnapshot(absPath));
+	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
+		message: /no longer available at this path/,
+	});
+	t.false(existsSync(absPath));
 	t.false(hasSeenFile(absPath));
 	t.false(hasFileSnapshot(absPath));
-	t.true((await writeFileTool.validator!({path: 'greet.py', content: 'new\n'})).valid);
-	await writeFile(join(workspace, 'greet.py'), 'new\n', 'utf-8');
+	await runValidatedWrite({path: 'greet.py', content: 'new\n'});
+	t.is(await readFile(absPath, 'utf-8'), 'new\n');
 	const overwrite = await writeFileTool.validator!({path: 'greet.py', content: 'again\n'});
-	t.false(overwrite.valid);
-	if (!overwrite.valid) t.regex(overwrite.error, /you have not read it this session/i);
+	t.true(overwrite.valid);
 });
 
-test.serial('file_op move clears source read and snapshot state', async t => {
+test.serial('file_op move makes write_file reject source recreation once before allowing a retry', async t => {
 	const source = join(workspace, 'greet.py');
 	const destination = join(workspace, 'moved.py');
 	setProjectRoot(workspace);
 	await runReadFile('greet.py');
 	t.true(hasFileSnapshot(source));
+	t.true((await writeFileTool.validator!({path: 'greet.py', content: 'new\n'})).valid);
 
 	await runFileOp({operation: 'move', path: 'greet.py', destination: 'moved.py'});
 
-	t.false(hasSeenFile(source));
-	t.false(hasFileSnapshot(source));
+	t.true(hasSeenFile(source));
+	t.true(hasFileSnapshot(source));
 	t.false(hasSeenFile(destination));
 	t.false(hasFileSnapshot(destination));
-	t.true((await writeFileTool.validator!({path: 'greet.py', content: 'new\n'})).valid);
+	await t.throwsAsync(runValidatedWrite({path: 'greet.py', content: 'new\n'}), {
+		message: /no longer available at this path/,
+	});
+	t.false(existsSync(source));
+	t.false(hasSeenFile(source));
+	t.false(hasFileSnapshot(source));
+	await runValidatedWrite({path: 'greet.py', content: 'new\n'});
+	t.is(await readFile(source, 'utf-8'), 'new\n');
+	t.is(await readFile(destination, 'utf-8'), "print('Hello, Agent!')\n");
 	const destinationOverwrite = await writeFileTool.validator!({
 		path: 'moved.py',
 		content: 'replacement\n',

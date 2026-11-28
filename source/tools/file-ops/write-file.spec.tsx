@@ -4,6 +4,7 @@ import {
 	mkdtemp,
 	readFile,
 	readdir,
+	realpath,
 	rm,
 	rename,
 	stat,
@@ -40,6 +41,7 @@ import {
 	resetFirewallConfig,
 	setFirewallConfig,
 } from '../../firewall/mutation-firewall.js';
+import {invalidateCache} from '../../utils/fs/file-cache.js';
 
 // ============================================================================
 // Test Helpers
@@ -119,6 +121,37 @@ async function executeValidatedWriteFile(args: {
 				messages: [],
 			}),
 		writeFileTool.validator,
+	);
+	return await handler(args, {toolCallId: 'test', messages: []});
+}
+
+async function executeValidatedStringReplace(args: {
+	path: string;
+	old_str: string;
+	new_str: string;
+}): Promise<string> {
+	const handler = withValidation(
+		input =>
+			(stringReplaceTool.tool as any).execute(input, {
+				toolCallId: 'test',
+				messages: [],
+			}),
+		stringReplaceTool.validator,
+	);
+	return await handler(args, {toolCallId: 'test', messages: []});
+}
+
+async function executeValidatedDiffEdit(args: {
+	path: string;
+	diff: string;
+}): Promise<string> {
+	const handler = withValidation(
+		input =>
+			(diffEditTool.tool as any).execute(input, {
+				toolCallId: 'test',
+				messages: [],
+			}),
+		diffEditTool.validator,
 	);
 	return await handler(args, {toolCallId: 'test', messages: []});
 }
@@ -376,6 +409,7 @@ test.serial('write_file allows overwriting after separate reads cover the whole 
 		process.chdir(testDir);
 		await executeReadFile({path: 'ranged.txt', start_line: 1, end_line: 2});
 		await executeReadFile({path: 'ranged.txt', start_line: 3, end_line: 4});
+		t.false(hasFileSnapshot(await realpath(join(testDir, 'ranged.txt'))));
 
 		const args = {
 			path: 'ranged.txt',
@@ -427,6 +461,7 @@ test.serial('write_file allows overwriting after reading a large-file preview an
 			start_line: FILE_READ_PREVIEW_LINES + 1,
 			end_line: totalLines,
 		});
+		t.false(hasFileSnapshot(await realpath(join(testDir, 'large-ranged.txt'))));
 
 		const args = {
 			path: 'large-ranged.txt',
@@ -483,7 +518,7 @@ test.serial('write_file validator: rejects stale content after full ranged reads
 		process.chdir(testDir);
 		await executeReadFile({path: 'ranged-stale.txt', start_line: 1, end_line: 1});
 		await executeReadFile({path: 'ranged-stale.txt', start_line: 2, end_line: 3});
-		t.false(hasFileSnapshot(filePath));
+		t.false(hasFileSnapshot(await realpath(filePath)));
 
 		const originalStats = await stat(filePath);
 		await writeFile(filePath, 'external\nsecond\n', 'utf-8');
@@ -555,6 +590,7 @@ test.serial('write_file allows a follow-up overwrite after string_replace', asyn
 	try {
 		process.chdir(testDir);
 		await executeReadFile({path: 'agent-string-edit.txt'});
+		t.true(hasFileSnapshot(await realpath(filePath)));
 		const edit = {path: 'agent-string-edit.txt', old_str: 'second', new_str: 'updated'};
 		const validation = await stringReplaceTool.validator!(edit);
 		t.true(validation.valid);
@@ -562,6 +598,7 @@ test.serial('write_file allows a follow-up overwrite after string_replace', asyn
 			toolCallId: 'test',
 			messages: [],
 		});
+		t.true(hasFileSnapshot(await realpath(filePath)));
 
 		const write = {path: 'agent-string-edit.txt', content: 'complete replacement\n'};
 		t.true((await writeFileTool.validator!(write)).valid);
@@ -579,6 +616,7 @@ test.serial('write_file allows a follow-up overwrite after diff_edit', async t =
 	try {
 		process.chdir(testDir);
 		await executeReadFile({path: 'agent-diff-edit.txt'});
+		t.true(hasFileSnapshot(await realpath(filePath)));
 		const edit = {
 			path: 'agent-diff-edit.txt',
 			diff: [
@@ -595,11 +633,143 @@ test.serial('write_file allows a follow-up overwrite after diff_edit', async t =
 			toolCallId: 'test',
 			messages: [],
 		});
+		t.true(hasFileSnapshot(await realpath(filePath)));
 
 		const write = {path: 'agent-diff-edit.txt', content: 'complete replacement\n'};
 		t.true((await writeFileTool.validator!(write)).valid);
 		await executeWriteFileWithoutRead(write);
 		t.is(await readFile(filePath, 'utf-8'), write.content);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file allows a follow-up overwrite after string_replace creates a file', async t => {
+	const filePath = join(testDir, 'created-string-edit.txt');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		const initial = {path: 'created-string-edit.txt', content: 'first\nsecond\n'};
+		await executeValidatedWriteFile(initial);
+
+		const edit = {path: initial.path, old_str: 'second', new_str: 'updated'};
+		await executeValidatedStringReplace(edit);
+
+		const overwrite = {path: initial.path, content: 'complete replacement\n'};
+		await executeValidatedWriteFile(overwrite);
+		t.is(await readFile(filePath, 'utf-8'), overwrite.content);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('write_file allows a follow-up overwrite after diff_edit creates a file', async t => {
+	const filePath = join(testDir, 'created-diff-edit.txt');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		const initial = {path: 'created-diff-edit.txt', content: 'first\nsecond\n'};
+		await executeValidatedWriteFile(initial);
+
+		const edit = {
+			path: initial.path,
+			diff: ['<<<<<<< SEARCH', 'second', '=======', 'updated', '>>>>>>> REPLACE'].join('\n'),
+		};
+		await executeValidatedDiffEdit(edit);
+
+		const overwrite = {path: initial.path, content: 'complete replacement\n'};
+		await executeValidatedWriteFile(overwrite);
+		t.is(await readFile(filePath, 'utf-8'), overwrite.content);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace does not promote a partial read to a full-file snapshot', async t => {
+	const filePath = join(testDir, 'partial-string-edit.txt');
+	await writeFile(filePath, 'first\nsecond\nthird\n', 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'partial-string-edit.txt', start_line: 2, end_line: 2});
+		t.false(hasFileSnapshot(await realpath(filePath)));
+
+		const edit = {path: 'partial-string-edit.txt', old_str: 'second', new_str: 'updated'};
+		t.true((await stringReplaceTool.validator!(edit)).valid);
+		await (stringReplaceTool.tool as any).execute(edit, {
+			toolCallId: 'test',
+			messages: [],
+		});
+
+		t.false(hasFileSnapshot(await realpath(filePath)));
+		const overwrite = await writeFileTool.validator!({
+			path: 'partial-string-edit.txt',
+			content: 'full replacement\n',
+		});
+		t.false(overwrite.valid);
+		if (!overwrite.valid) t.regex(overwrite.error, /haven't read all of its content/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('diff_edit does not promote a partial read to a full-file snapshot', async t => {
+	const filePath = join(testDir, 'partial-diff-edit.txt');
+	await writeFile(filePath, 'first\nsecond\nthird\n', 'utf-8');
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'partial-diff-edit.txt', start_line: 2, end_line: 2});
+		t.false(hasFileSnapshot(await realpath(filePath)));
+
+		const edit = {
+			path: 'partial-diff-edit.txt',
+			diff: ['<<<<<<< SEARCH', 'second', '=======', 'updated', '>>>>>>> REPLACE'].join('\n'),
+		};
+		t.true((await diffEditTool.validator!(edit)).valid);
+		await (diffEditTool.tool as any).execute(edit, {
+			toolCallId: 'test',
+			messages: [],
+		});
+
+		t.false(hasFileSnapshot(await realpath(filePath)));
+		const overwrite = await writeFileTool.validator!({
+			path: 'partial-diff-edit.txt',
+			content: 'full replacement\n',
+		});
+		t.false(overwrite.valid);
+		if (!overwrite.valid) t.regex(overwrite.error, /haven't read all of its content/);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test.serial('string_replace refuses stale partial-read bytes with restored mtime and size', async t => {
+	const filePath = join(testDir, 'partial-stale-string-edit.txt');
+	const fixedTime = new Date('2020-01-01T00:00:00.000Z');
+	await writeFile(filePath, 'first\nsecond\n', 'utf-8');
+	await utimes(filePath, fixedTime, fixedTime);
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(testDir);
+		await executeReadFile({path: 'partial-stale-string-edit.txt', start_line: 1, end_line: 1});
+		t.false(hasFileSnapshot(await realpath(filePath)));
+
+		await writeFile(filePath, 'first\nthird!\n', 'utf-8');
+		await utimes(filePath, fixedTime, fixedTime);
+		invalidateCache(filePath);
+
+		const edit = {path: 'partial-stale-string-edit.txt', old_str: 'first', new_str: 'FIRST'};
+		t.true((await stringReplaceTool.validator!(edit)).valid);
+		await t.throwsAsync(
+			(stringReplaceTool.tool as any).execute(edit, {
+				toolCallId: 'test',
+				messages: [],
+			}),
+			{message: /changed since it was read/},
+		);
+		t.false(hasFileSnapshot(await realpath(filePath)));
+		t.is(await readFile(filePath, 'utf-8'), 'first\nthird!\n');
 	} finally {
 		process.chdir(originalCwd);
 	}

@@ -2,6 +2,7 @@ import {open, realpath, stat} from 'node:fs/promises';
 import {
 	hasFileSnapshot,
 	matchesFileSnapshot,
+	matchesVisibilityContent,
 } from '@/tools/runtime/read-tracker';
 
 /** Confirm cached edit input still matches the exact file read from disk. */
@@ -34,6 +35,8 @@ export async function matchesCurrentFileContent(
 		) {
 			return false;
 		}
+
+		if (matchesVisibilityContent(absPath, content) === false) return false;
 
 		return (
 			!hasFileSnapshot(absPath) ||

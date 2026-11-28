@@ -47,7 +47,6 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 			evaluatePathMutation('delete', {source: args.path as string}),
 		);
 		await rm(absPath);
-		forgetFileState(absPath);
 		invalidateCache(absPath);
 		return `File deleted: ${args.path}${firewallWarning}`;
 	}
@@ -64,7 +63,6 @@ const executeFileOp = async (args: FileOpArgs): Promise<string> => {
 
 	if (operation === 'move') {
 		await rename(srcAbsPath, destAbsPath);
-		forgetFileState(srcAbsPath);
 		forgetFileState(destAbsPath);
 		invalidateCache(srcAbsPath);
 		invalidateCache(destAbsPath);
