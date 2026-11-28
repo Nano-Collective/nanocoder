@@ -11,6 +11,7 @@ import {
 import {ThemeContext} from '@/hooks/useTheme';
 import {getSafeSessionCwd} from '@/services/session-cwd';
 import {EditRecoveryError} from '@/tools/file-ops/edit-recovery';
+import {fitEditToLineEndings} from '@/tools/file-ops/line-endings';
 import {
 	countLiteralOccurrences,
 	replaceFirstLiteral,
@@ -139,6 +140,24 @@ export function parseDiffEditBlocks(diff: string): DiffEditBlock[] {
 	}
 
 	return blocks;
+}
+
+/**
+ * Fit every block to the file's line endings, so LF blocks from the model
+ * match a CRLF file and replacement lines are written as CRLF.
+ */
+function fitBlocksToLineEndings(
+	fileContent: string,
+	blocks: DiffEditBlock[],
+): DiffEditBlock[] {
+	return blocks.map(block => {
+		const {oldStr, newStr} = fitEditToLineEndings(
+			fileContent,
+			block.search,
+			block.replace,
+		);
+		return {search: oldStr, replace: newStr};
+	});
 }
 
 function validateBlocks(
@@ -285,13 +304,14 @@ const executeDiffEdit = async (args: DiffEditArgs): Promise<string> => {
 	}
 
 	const absPath = resolve(getSafeSessionCwd(), path);
-	const blocks = parseDiffEditBlocks(diff);
+	const parsedBlocks = parseDiffEditBlocks(diff);
 	const cached = await getCachedFileContent(absPath);
 	const encodingResult = validateEditableEncoding(path, cached);
 	if (!encodingResult.valid) {
 		throw new Error(encodingResult.error);
 	}
 	const fileContent = cached.content;
+	const blocks = fitBlocksToLineEndings(fileContent, parsedBlocks);
 
 	const newContent = validateBlocks(fileContent, blocks, path);
 
@@ -450,9 +470,12 @@ const diffEditFormatter = async (
 
 	if (result === undefined && isVSCodeConnected()) {
 		try {
-			const blocks = parseDiffEditBlocks(args.diff);
 			const cached = await getCachedFileContent(absPath);
 			const fileContent = cached.content;
+			const blocks = fitBlocksToLineEndings(
+				fileContent,
+				parseDiffEditBlocks(args.diff),
+			);
 			const newContent = validateBlocks(fileContent, blocks, args.path);
 			const changeId = sendFileChangeToVSCode(
 				absPath,
@@ -528,13 +551,14 @@ const diffEditValidator = async (
 		const cached = await getCachedFileContent(absPath);
 		const encodingResult = validateEditableEncoding(args.path, cached);
 		if (!encodingResult.valid) return encodingResult;
-		validateBlocks(cached.content, blocks, args.path);
+		const fittedBlocks = fitBlocksToLineEndings(cached.content, blocks);
+		validateBlocks(cached.content, fittedBlocks, args.path);
 
 		// Line-level visibility check: ensure the agent has actually read the lines
 		// in each SEARCH block. This prevents blind edits where the model hallucinates
 		// SEARCH content it never saw.
 		const allTargetLines: number[] = [];
-		for (const block of blocks) {
+		for (const block of fittedBlocks) {
 			const blockLines = getLineNumbersForText(cached.content, block.search);
 			allTargetLines.push(...blockLines);
 		}
