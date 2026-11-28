@@ -20,7 +20,7 @@ The project rests on three purposes, in equal measure:
 
 - **Community-driven.** Owned by the Nano Collective, governed in public, contribution model written down. No backroom plan to monetize. No investor return to deliver. No paid tier ever.
 - **Privacy-respecting.** Zero telemetry. Zero tracking. No analytics product, no usage metrics phoned home. The only calls Nanocoder makes on its own are an anonymous version check and a model-metadata download, both described below. What you do in Nanocoder stays in Nanocoder.
-- **Local-first.** Designed so the whole loop can run on your machine. Eight local server integrations documented as first-class providers, not as power-user escape hatches.
+- **Local-first.** Designed so the whole loop can run on your machine. Nine local server integrations documented as first-class providers, not as power-user escape hatches.
 
 The features below are how those three purposes show up in practice.
 
@@ -67,10 +67,10 @@ Twelve axes grouped into four buckets:
 Nanocoder's provider list is the broadest of any community-led project here:
 
 - **Native cloud**: Anthropic, Atlas Cloud, ChatGPT / Codex, CloudGPU, Google Gemini, GitHub Copilot, GitHub Models, GMI Cloud, Groq, Kimi Code, MiniMax Coding, Mistral, OpenAI, OpenRouter, Poe, PopNow, Requesty, Runcrate, Thesean AI, Together AI, Z.ai, Z.ai Coding
-- **Local**: Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM
+- **Local**: Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, Rapid-MLX, vLLM
 - **Custom**: any OpenAI-compatible endpoint
 
-OpenCode and OMP both list more total providers in aggregate. Nanocoder's distinction is narrower and worth stating precisely: eight *local* servers documented as first-class providers with their own setup pages, rather than as entries in a config schema.
+OpenCode and OMP both list more total providers in aggregate. Nanocoder's distinction is narrower and worth stating precisely: nine *local* servers documented as first-class providers with their own setup pages, rather than as entries in a config schema.
 
 ### Ownership and governance
 
@@ -94,7 +94,7 @@ Nanocoder is the only project in this survey that is **collectively owned, non-p
 
 | Tool | Local models | MCP | Extensibility | Tool calling | Subagents / scheduled |
 |---|---|---|---|---|---|
-| **Nanocoder** | **8 local servers (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), lifecycle hooks, in-process JavaScript plugins, MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (malformed calls are sent back to the model to self-correct)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
+| **Nanocoder** | **9 local servers (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX, Rapid-MLX, vLLM)** | **Client** | **Slash + custom markdown commands, custom tools, Skills (bundles + flat-file), lifecycle hooks, in-process JavaScript plugins, MCP, LSP, runtime model tuning** | **Native function calling + XML fallback + JSON fallback (malformed calls are sent back to the model to self-correct)** | **Subagents + cron scheduler + event-driven triggers via per-project daemon** |
 | Claude Code | None (cloud only) | Client | Slash commands, Skills, Hooks, Agent SDK | Native | Subagents + Routines (cloud cron) |
 | Codex CLI | Via OpenAI-compatible config | Client | Slash commands, AGENTS.md, Skills, lifecycle hooks | Native | Subagents; no cron |
 | Gemini CLI | Not documented | Client | Custom commands, Extensions, tools, hooks | Native | Subagents; no scheduler |
@@ -179,7 +179,7 @@ Against a local model, those two lookups are the only outbound traffic, and both
 
 ### 3. Local-first by design
 
-Aider, OpenCode, and Crush will run against a local model. Nanocoder is built around the assumption that you might want to. Eight local server integrations (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, vLLM) are documented as first-class providers, not power-user hacks buried in a config schema. The Nano Collective also publishes [Nanotune](https://docs.nanocollective.org/nanotune), an interactive fine-tuning CLI for Apple Silicon, which is the supply side of the same philosophy: smaller local models that are actually good at coding.
+Aider, OpenCode, and Crush will run against a local model. Nanocoder is built around the assumption that you might want to. Nine local server integrations (Atomic Chat, Ollama, llama.cpp, llama-swap, LM Studio, LocalAI, MLX Server, Rapid-MLX, vLLM) are documented as first-class providers, not power-user hacks buried in a config schema. The Nano Collective also publishes [Nanotune](https://docs.nanocollective.org/nanotune), an interactive fine-tuning CLI for Apple Silicon, which is the supply side of the same philosophy: smaller local models that are actually good at coding.
 
 If your laptop has the silicon, you can run the entire loop without sending a prompt or a line of code anywhere.
 

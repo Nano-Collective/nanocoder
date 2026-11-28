@@ -206,17 +206,16 @@ const DAY_NAMES: Record<string, string> = {
 };
 
 function formatDayOfWeek(dow: string): string {
-	// Handle ranges like 1-5
-	if (dow.includes('-')) {
-		const [start, end] = dow.split('-');
-		return `${DAY_NAMES[start?.toUpperCase()] ?? start}-${DAY_NAMES[end?.toUpperCase()] ?? end}`;
-	}
-	// Handle lists like 1,3,5
-	if (dow.includes(',')) {
-		return dow
-			.split(',')
-			.map(d => DAY_NAMES[d.toUpperCase()] ?? d)
-			.join(', ');
-	}
-	return DAY_NAMES[dow.toUpperCase()] ?? dow;
+	const dayName = (d: string) => DAY_NAMES[d.toUpperCase()] ?? d;
+	// Split a list like 1,3,5 first, so a part of it can be a range like 1-3
+	return dow
+		.split(',')
+		.map(part => {
+			if (part.includes('-')) {
+				const [start, end] = part.split('-');
+				return `${dayName(start ?? '')}-${dayName(end ?? '')}`;
+			}
+			return dayName(part);
+		})
+		.join(', ');
 }

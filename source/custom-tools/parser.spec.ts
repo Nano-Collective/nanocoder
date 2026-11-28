@@ -239,13 +239,26 @@ echo`,
 	t.throws(() => parseCustomToolFile(path), {message: /pattern/});
 });
 
+test('accepts timeout_ms at the two hour cap', t => {
+	const path = writeTool(
+		'two-hour-timeout.md',
+		`---
+name: x
+description: foo
+timeout_ms: 7200000
+---
+echo`,
+	);
+	t.is(parseCustomToolFile(path).metadata.timeoutMs, 7_200_000);
+});
+
 test('throws on timeout_ms over the cap', t => {
 	const path = writeTool(
 		'long-timeout.md',
 		`---
 name: x
 description: foo
-timeout_ms: 600000
+timeout_ms: 7200001
 ---
 echo`,
 	);

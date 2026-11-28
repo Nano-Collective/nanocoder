@@ -76,6 +76,11 @@ export interface CommandContext {
 	messages: Message[];
 	/** Replace the conversation (compaction, restore). */
 	setMessages: (messages: Message[]) => void;
+	/**
+	 * Add messages to the end of the conversation as it is now, for commands
+	 * that finish after other turns may have landed.
+	 */
+	appendMessages: (messages: Message[]) => void;
 	provider: string;
 	model: string;
 	client: import('@/types/core').LLMClient | null;

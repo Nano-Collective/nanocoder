@@ -32,6 +32,7 @@ Run on your machine, typically no API key required.
 - [vLLM](vllm.md) - High-throughput serving engine
 - [LocalAI](localai.md) - OpenAI-compatible local API
 - [llama-swap](llama-swap.md) - Model multiplexer for llama.cpp
+- [Rapid-MLX](rapid-mlx.md) - High-performance Apple Silicon MLX inference server
 
 ## Cloud Providers (OpenAI-Compatible)
 
@@ -185,7 +186,7 @@ API keys and other config values support environment variable substitution:
 
 - `$VAR_NAME` - simple variable reference
 - `${VAR_NAME}` - braced reference
-- `${VAR_NAME:-default}` - reference with default value
+- `${VAR_NAME:-default}` - reference with default value, used when `VAR_NAME` is unset or empty
 - `$$` - escape for a literal `$` (e.g. `pa$$WORD` or `$$VAR_NAME`)
 
 ```json

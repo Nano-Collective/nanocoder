@@ -62,11 +62,33 @@ test('substituteEnvVars - handles mixed braced and unbraced vars', t => {
 	delete process.env.VAR2;
 });
 
-test('substituteEnvVars - keeps default value when env var is set but empty', t => {
+test('substituteEnvVars - uses default value when env var is set but empty', t => {
 	process.env.EMPTY_VAR = '';
 	const result = substituteEnvVars('${EMPTY_VAR:-default}');
-	t.is(result, '');
+	t.is(result, 'default');
 	delete process.env.EMPTY_VAR;
+});
+
+test('substituteEnvVars - empty env var falls back to default inside a URL', t => {
+	process.env.LOCAL_LLM_URL = '';
+	const result = substituteEnvVars({
+		baseUrl: '${LOCAL_LLM_URL:-http://127.0.0.1:8080/v1}',
+	});
+	t.deepEqual(result, {baseUrl: 'http://127.0.0.1:8080/v1'});
+	delete process.env.LOCAL_LLM_URL;
+});
+
+test('substituteEnvVars - braced and unbraced vars keep an empty value', t => {
+	process.env.EMPTY_VAR = '';
+	t.is(substituteEnvVars('[${EMPTY_VAR}]'), '[]');
+	t.is(substituteEnvVars('[$EMPTY_VAR]'), '[]');
+	delete process.env.EMPTY_VAR;
+});
+
+test('substituteEnvVars - non-empty env var still wins over the default', t => {
+	process.env.SET_VAR = 'value';
+	t.is(substituteEnvVars('${SET_VAR:-default}'), 'value');
+	delete process.env.SET_VAR;
 });
 
 test('substituteEnvVars - default value with special characters', t => {

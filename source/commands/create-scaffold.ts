@@ -319,7 +319,7 @@ name: ${toolName}                       # * MUST match ^[a-z][a-z0-9_]*$
 description: One-line summary.         # * shown to the LLM
 approval: never | always | destructive # * required choice (see picking guide below)
 read_only: true | false                # default: (approval == 'never'); set false for writes
-timeout_ms: 30000                      # default 30000, max 300000
+timeout_ms: 30000                      # default 30000, max 7200000 (2 hours)
 shell: bash | sh                       # default: bash if available, else sh
 cwd: ./scripts                         # optional; default project root; supports \${VAR}
 env:                                   # optional; values support \${VAR}
@@ -559,7 +559,7 @@ approval: never                              # * 'never' | 'always' | 'destructi
                                              #   - always: prompts the user every time
                                              #   - destructive: prompts in normal mode, auto in auto-accept/architect/yolo/headless
 read_only: true                              # default: (approval == 'never'); set false for writes
-timeout_ms: 30000                            # default 30000, max 300000
+timeout_ms: 30000                            # default 30000, max 7200000 (2 hours)
 shell: bash                                  # 'bash' | 'sh'; default bash if available else sh
 cwd: ./scripts                               # optional; default project root; supports \${VAR}
 env:                                         # optional; values support \${VAR}
